@@ -1,3 +1,4 @@
+print("Loading modules...")
 import os
 import pandas as pd
 import numpy as np
@@ -5,7 +6,8 @@ import torch
 import torch.nn as nn
 from torchsummary import summary
 from torchvision import transforms, models
-import data_setup, model_builder, engine, utils
+from torch.utils.tensorboard import SummaryWriter
+import data_setup, model_builder, engine, utils, learning_stuff.siamese_networks.matching as matching
 import matplotlib.pyplot as plt
 import argparse
 
@@ -40,12 +42,12 @@ parser.add_argument("--margin", type=float, default=0.9, help="Least distance be
 parser.add_argument("--patience", type=int, default=5, help="For early-stopping: Number of consecutive epochs without improvement to val_loss for early stopping.")
 parser.add_argument("--min_delta", type=float, default=1e-3, help="For early-stopping: Minimum improvement in val_loss for early stopping.")
 parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
-parser.add_argument("--l1", type=int, default=8, help="Number of channels at layers with l1 parameter. Check model for clarification.")
-parser.add_argument("--l2", type=int, default=16, help="Number of channels at layers with l2 parameter. Check model for clarification.")
-parser.add_argument("--l3", type=int, default=32, help="Number of channels at layers with l3 parameter. Check model for clarification.")
+parser.add_argument("--l1", type=int, default=32, help="Number of channels at layers with l1 parameter. Check model for clarification.")
+parser.add_argument("--l2", type=int, default=32, help="Number of channels at layers with l2 parameter. Check model for clarification.")
+parser.add_argument("--l3", type=int, default=128, help="Number of channels at layers with l3 parameter. Check model for clarification.")
 parser.add_argument("--l4", type=int, default=64, help="Number of channels at layers with l4 parameter. Check model for clarification.")
 parser.add_argument("--l5", type=int, default=128, help="Number of channels at layers with l5 parameter. Check model for clarification.")
-parser.add_argument("--fc1", type=int, default=1024, help="Number of nodes in first FC layer. Check model for clarification.")
+parser.add_argument("--fc1", type=int, default=512, help="Number of nodes in first FC layer. Check model for clarification.")
 parser.add_argument("--fc2", type=int, default=128, help="Number of nodes in second FC layer, final output. Check model for clarification.")
 parser.add_argument("--targets", type=utils.parse_targets, default=[0], help="The output node from the final FC layer to investigate in model interpretation")
 
@@ -117,7 +119,7 @@ transform = transforms.Compose([
 ])
 
 data_setup.input_size = 400 # Change input image size if using cropping
-print("Input size:", data_setup.input_size)
+print("Input image size:", data_setup.input_size)
 
 train_dataloader, validation_dataloader, test_dataloader = data_setup.create_dataloaders(
                                                             data_folder,
@@ -130,6 +132,7 @@ train_dataloader, validation_dataloader, test_dataloader = data_setup.create_dat
                                                             random_seed=RANDOM_SEED,
                                                             distance_function=DISTANCE_FUNCTION
                                                             )
+
 
 # Setup target device
 os.environ["CUDA_VISIBLE_DEVICES"] = device_nr  # Choose which device to use (astro01 has 4 gpu's)
@@ -147,10 +150,9 @@ print(f"[batch_size, channels, height, width]", {batch_shape})
 
 
 
-
 ##########----- Set model, loss_func and optimizer -----##########
 
-model = model_builder.SiameseNetwork(l1=L1, l2=L2, l3=L3, l4=L4, l5=L5, 
+model = model_builder.SiameseNetwork_he_init_batchnorm(l1=L1, l2=L2, l3=L3, l4=L4, l5=L5, 
                                      fc_units1=FC_UNITS1, 
                                      fc_units2=FC_UNITS2)
 
@@ -169,7 +171,8 @@ optimizer = torch.optim.Adam(model.parameters(),
 ##########----- Add writer -----##########
 
 # Add writer for experiment recording
-
+log_dir = os.path.join('experiments', model_name)
+writer = SummaryWriter(log_dir=log_dir)
 
 ##########----- Train! -----##########
 
@@ -182,7 +185,7 @@ engine.training(model=model,
                 optimizer=optimizer,
                 num_epochs=NUM_EPOCHS,
                 device=device,
-                writer=None,
+                writer=writer,
                 patience=PATIENCE,
                 min_delta=MIN_DELTA)
 
@@ -228,20 +231,22 @@ engine.testing(model,
 
 ########## Model interpretation ##########
 h5_filename = os.path.join(output_dir, model_name, "batch_data.h5")
+attrib_anim = False # If True, save animation of all attributions
 
 targets = args.targets # Specify which output element of the final FC layers to investigate the model using integrated gradients
 if targets[0] > -1:
-    attrib_anim = False # If True, save animation of all attributions
 
+    layer = None
+    method = "FC2"
+
+    if attrib_anim == True:
+        for n in [0, 1]:
+            utils.animate_attr(output_dir, model_name, n, save=True)
+
+elif targets == [999]:
+    targets = np.arange(0, L5-1)
     method = "layer"
-
-    if method == "layer":
-        layer = model.encoder[0]
-    else:
-        layer = None
-
-    if targets == [999]:
-        targets = np.arange(0, L5-1)
+    layer = model.encoder[0]
     # Loading saved output
     print("Loading saved output")
     truths, predictions, output1s, output2s, img1_list, img2_list = utils.get_batch_data_hdf5(h5_filename)
@@ -256,9 +261,7 @@ if targets[0] > -1:
                     layer,
                     method)
 
-    if attrib_anim == True:
-        for n in [0, 1]:
-            utils.animate_attr(output_dir, model_name, n, save=True)
+    
 
 
 h5_training_stats = os.path.join(output_dir, model_name, "training_stats.h5")
@@ -277,3 +280,21 @@ if plot_matches == True:
     
     print("Saved images of 10 best/worst true and predicted matches")
 
+
+target_dir = "/lustre/astro/antonmol/xnew_datafolders/datafolder_00404/projection_3.pkl"
+target_projection = "3"
+
+test_dataloader_path = os.path.join(dataloader_dir, \
+        f"tsize{TRAIN_SIZE}_bsize{BATCH_SIZE}_test_{data_setup.input_size}_{data_setup.distance_function}.pth")
+
+matching.run(
+    output_dir,
+    model_name,
+    model,
+    test_dataloader,
+    test_dataloader_path,
+    target_dir,
+    target_projection,
+    transform,
+    BATCH_SIZE,
+    device,)

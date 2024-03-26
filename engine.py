@@ -164,13 +164,16 @@ def training(model: nn.Module,
         train_first_output = []
         train_second_output = []
 
+        metadata1 = []
+        metadata2 = []
 
         for batch in train_dataloader:
-            #print("bshape", batch.shape)
+            #print("bshape", batch)
             img1, img2 = batch[0], batch[1] # OBS: Model takes as input image sets when working with batches
             img1 = img1.to(device).float()
             img2 = img2.to(device).float()
             sim_score = batch[2].to(device).float()
+            
 
             optimizer.zero_grad()
             with torch.autocast(device_type="cuda", dtype=torch.float16):
@@ -189,6 +192,7 @@ def training(model: nn.Module,
             training_loss_output.append(torch.mean(training_loss).item())
             train_first_output.append(torch.mean(train_first).item())
             train_second_output.append(torch.mean(train_second).item())
+            
 
 
         training_loss = np.mean(training_loss_output) # Getting the mean loss for the batch
@@ -204,12 +208,25 @@ def training(model: nn.Module,
         if writer:
             # Add results to SummaryWriter
             writer.add_scalar(tag="Training loss", 
-                            scalar_value=np.mean(training_loss_output),
-                            global_step=epoch)
+                            scalar_value=training_loss,
+                            global_step=epoch
+                            )
             
             writer.add_graph(model=model, 
-                        # Pass in an example input
-                        input_to_model=torch.randn(4, 1, 400, 400).to(device))
+                            # Pass in an example input
+                            #input_to_model=torch.randn(4, 1, 400, 400).to(device))
+                             input_to_model = (img1, img2)
+                            )
+
+            # for name, param in model.named_parameters():
+            #     writer.add_histogram(name, param.clone().cpu().data.numpy(), epoch)
+            
+            # # Add input images
+            # writer.add_images('Input Images', img1, global_step=epoch)
+            # writer.add_images('Input Images', img2, global_step=epoch)
+            # # Add output images
+            # writer.add_images('Output Images', output_images, global_step=epoch)
+
             # Close the writer
             writer.close()
         
@@ -255,7 +272,7 @@ def training(model: nn.Module,
         os.makedirs(os.path.dirname(h5_filename), exist_ok=True)
         with h5py.File(h5_filename, "w") as hf:
             batch_id = "All batches"
-            train_params = {"epoch": np.arange(1, num_epochs+1), 
+            train_val_params = {"epoch": np.arange(1, num_epochs+1), 
                             "training_loss": training_losses, 
                             "first_train_loss": first_train_losses,
                             "second_train_loss": second_train_losses,
@@ -263,8 +280,7 @@ def training(model: nn.Module,
                             "first_val_loss": first_val_losses,
                             "second_val_loss": second_val_losses,
                             }
-            
-            utils.save_batch_data_hdf5(hf, train_params, batch_id)
+            utils.save_batch_data_hdf5(hf, train_val_params, batch_id)
         if writer:
             # Add validation loss to SummaryWriter
             writer.add_scalar(tag="Validation Loss",
@@ -345,7 +361,7 @@ def calculate_mse_from_hdf5(h5_filename):
     
     "Used to calculate the mean squared error of the truths vs. predictions"
 
-    truths, predictions, _, _, _, _ = utils.get_batch_data_hdf5(h5_filename)
+    truths, predictions = utils.get_batch_data_hdf5(h5_filename)[:2]
     print("Truth/prediction datapoints:", len(truths))
     if len(truths) >= 30:
         print("First 30 truths:", truths[0:30])
@@ -355,7 +371,7 @@ def calculate_mse_from_hdf5(h5_filename):
     return mse
 
 
-def create_clustering_plot(h5_filename, output_dir, model_name, id):
+def create_clustering_plot(h5_filename, output_dir, model_name, id=None):
     """
     Creates plot of truths versus predictions for 
     1. The direct comparisons: 
@@ -366,7 +382,7 @@ def create_clustering_plot(h5_filename, output_dir, model_name, id):
 
     """
     
-    truths, predictions, _, _, _, _ = utils.get_batch_data_hdf5(h5_filename)
+    truths, predictions = utils.get_batch_data_hdf5(h5_filename)[:2]
     save_dir = os.path.join(output_dir, model_name, "images")
     save_name = os.path.join(output_dir, model_name, "images")
     output_dir_path = Path(save_name)
@@ -408,7 +424,7 @@ def create_clustering_plot(h5_filename, output_dir, model_name, id):
 def visualize_embeddings(h5_filename, output_dir, model_name):
 
 
-    truths, predictions, out1, out2, _, _ = utils.get_batch_data_hdf5(h5_filename)
+    truths, predictions, out1, out2 = utils.get_batch_data_hdf5(h5_filename)[:4]
     tsne = TSNE(n_components=2, random_state=42)
     embed = np.vstack((out1, out2)).T
 
@@ -458,9 +474,17 @@ def testing(model: nn.Module,
                                                           img2_batch.to(device).float())
             truths_batch = batch[2]
             
+            metadata1 = batch[3]
+            metadata2 = batch[4]
+            metadata1_raw = batch[5]
+            metadata2_raw = batch[6]
+
+
             test_params = {"img1": img1_batch, "img2": img2_batch,
                       "out1": out1_batch, "out2": out2_batch,
-                      "truths": truths_batch, "predictions": predictions_batch}
+                      "truths": truths_batch, "predictions": predictions_batch,
+                      "metadata1": metadata1, "metadata2": metadata2,
+                      }
             
             utils.save_batch_data_hdf5(hf, test_params, batch_id)
         
@@ -482,5 +506,7 @@ def testing(model: nn.Module,
     #visualize_embeddings(h5_filename, output_dir, model_name)
 
     return 
+
+
 
 

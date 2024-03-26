@@ -50,7 +50,10 @@ t_stats = [4.15463518978504 , 166.8422452216837 , 85.73724726640633 , 48.5294244
 
 def metadata_normalization(md_paths):
     
-    "Calculate minimum and maximum for each parameter to normalize it"
+    """
+    Calculate minimum and maximum for each parameter to normalize it. 
+    Function not used in training loop
+    """
     
     print("Normalizing metadata...")
     metadata_files = []
@@ -107,6 +110,14 @@ def get_metadata(md, filetype="dataframe", norm_type="z_score"):
     # e = math.sqrt((1-r/a))
     # OP = math.acos((a * (1-e**2) / r) - 1)
 
+    md_p_raw = {"ar_p": S['accretion_rate_primary'], 
+                    "ar_s": S['accretion_rate_secondary'].value, 
+                    "mih": S['mass_in_100'],
+                    "m": S["rsink file"]["m"][p], 
+                    "ds": S['disk size'], 
+                    "sep": S['separation'].value,
+                    "t": S['t_after_formation'].value, 
+                                }
 
     if norm_type == "minmax":
         
@@ -118,6 +129,7 @@ def get_metadata(md, filetype="dataframe", norm_type="z_score"):
                 "sep": ((S['separation'].value) - sep_stats[0]) / (sep_stats[1] - sep_stats[0]),
                 "t": ((S['t_after_formation'].value) - t_stats[0]) / (t_stats[1] - t_stats[0]), 
                                 }
+        
     elif norm_type == "z_score":
     
 
@@ -133,27 +145,27 @@ def get_metadata(md, filetype="dataframe", norm_type="z_score"):
     
     if filetype == "dataframe":
         primary_md = pd.DataFrame(md_p, index=["Primary"])
+        primary_md_raw = pd.DataFrame(md_p_raw, index=["Primary_raw"])
         #secondary_md = pd.DataFrame(md_s, index=["Secondary"])
         #metadata = pd.concat([primary_md, secondary_md])
     
-    return primary_md
+    return primary_md, primary_md_raw
 
 # -------------- Similarity function --------------------
-def similarity_function(md1, md2, distance_function="euclid"):
+def similarity_function(md1, md2, distance_function="cosine"):
 
-    MD1 = get_metadata(md1, filetype="dataframe", norm_type=norm_type)
-    MD2 = get_metadata(md2, filetype="dataframe", norm_type=norm_type)
+    MD1 = get_metadata(md1, filetype="dataframe", norm_type=norm_type)[:1]
+    MD2 = get_metadata(md2, filetype="dataframe", norm_type=norm_type)[:1]
     
     MD1 = np.array(MD1)
     MD2 = np.array(MD2)
    
-    MD1_tensor = torch.tensor(np.array(MD1))  # Convert MD1 to a PyTorch tensor
-    MD2_tensor = torch.tensor(np.array(MD2))
+    MD1_tensor = torch.tensor(np.array(MD1))[0]  # Convert MD1 to a PyTorch tensor
+    MD2_tensor = torch.tensor(np.array(MD2))[0]
 
     if distance_function == "cosine":
         truth = F.cosine_similarity(MD1_tensor, MD2_tensor)
-
-
+        
         # truth = (1 + truth) / 2  # Mapping from [-1, 1] to [0, 1]
         # truth = 1-truth
         # x = 5 * (truth - 0.5)
@@ -266,7 +278,7 @@ class SetupData(Dataset):
         return img1, img2
     
     def calculate_similarity(self, md1, md2, distance_function):
-        truth = similarity_function(md1, md2, distance_function)
+        truth= similarity_function(md1, md2, distance_function)
         return truth
 
     def __getitem__(self, index):
@@ -285,8 +297,11 @@ class SetupData(Dataset):
             img1 = self.transform(img1) #NOTE: Make sure the transform converts to pytorch tensors
             img2 = self.transform(img2)
 
+        # Get metadata
+        MD1, MD1_raw = get_metadata(md1, filetype="dataframe", norm_type=norm_type)
+        MD2, MD2_raw = get_metadata(md2, filetype="dataframe", norm_type=norm_type)
 
-        return img1, img2, truth_label
+        return img1, img2, truth_label, np.array(MD1), np.array(MD2), np.array(MD1_raw), np.array(MD2_raw)
 
     
 

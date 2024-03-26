@@ -106,6 +106,7 @@ def get_batch_data_hdf5(h5_filename):
     """
     truths_list, predictions_list, output1s_list, output2s_list = [], [], [], []
     img1s_list, img2s_list = [], []
+    md1_list, md2_list = [], []
     with h5py.File(h5_filename, "r") as hf:
         for batch_id, batch_group in hf.items():
             truths_list.append(batch_group["truths"][:].ravel())
@@ -114,6 +115,8 @@ def get_batch_data_hdf5(h5_filename):
             output2s_list.append(batch_group["out2"][:])
             img1s_list.append(batch_group["img1"][:])
             img2s_list.append(batch_group["img2"][:])
+            md1_list.append(batch_group["metadata1"][:])
+            md2_list.append(batch_group["metadata2"][:])
 
     truths = np.concatenate(truths_list)
     predictions = np.concatenate(predictions_list)
@@ -121,8 +124,10 @@ def get_batch_data_hdf5(h5_filename):
     img2s = np.concatenate(img2s_list)
     output1s = np.concatenate(output1s_list)
     output2s = np.concatenate(output2s_list)
+    md1s = np.concatenate(md1_list)
+    md2s = np.concatenate(md2_list)
 
-    return truths, predictions, output1s, output2s, img1s, img2s
+    return truths, predictions, output1s, output2s, img1s, img2s, md1s, md2s
 
 
 
