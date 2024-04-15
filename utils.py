@@ -3,6 +3,7 @@ import torch.nn as nn
 #import torchsummary
 from torchsummary import summary
 import numpy as np
+import pandas as pd
 from pathlib import Path
 import os
 import matplotlib.pyplot as plt
@@ -90,10 +91,7 @@ def save_batch_data_hdf5(hf, params: dict, batch_id: int):
             batch_group.create_dataset(f"{name}", data=param)
 
     
-
-
-
-def get_batch_data_hdf5(h5_filename):
+def get_batch_data_hdf5(h5_filename, param_names):
     """
     Used to import data stored as hdf5 file.
     Parameters imported are all from during training or testing.
@@ -104,30 +102,84 @@ def get_batch_data_hdf5(h5_filename):
     img1: first input image
     img2: second input image
     """
-    truths_list, predictions_list, output1s_list, output2s_list = [], [], [], []
-    img1s_list, img2s_list = [], []
-    md1_list, md2_list = [], []
+
+    data = {name: [] for name in param_names}
+
     with h5py.File(h5_filename, "r") as hf:
         for batch_id, batch_group in hf.items():
-            truths_list.append(batch_group["truths"][:].ravel())
-            predictions_list.append(batch_group["predictions"][:].ravel())
-            output1s_list.append(batch_group["out1"][:])
-            output2s_list.append(batch_group["out2"][:])
-            img1s_list.append(batch_group["img1"][:])
-            img2s_list.append(batch_group["img2"][:])
-            md1_list.append(batch_group["metadata1"][:])
-            md2_list.append(batch_group["metadata2"][:])
+            for name in param_names:
+                try: 
+                    batch_group[name]
+                except:
+                    print(f"Parameter {name} not in file {h5_filename}. \n Parameters: {batch_group.keys()}")
+                    break
+                if name in ["truths", "predictions"]:
+                    data[name] = np.concatenate([batch_group[name][:].ravel()])
+                else:
+                    data[name] = np.concatenate([batch_group[name][:]])
 
-    truths = np.concatenate(truths_list)
-    predictions = np.concatenate(predictions_list)
-    img1s = np.concatenate(img1s_list)
-    img2s = np.concatenate(img2s_list)
-    output1s = np.concatenate(output1s_list)
-    output2s = np.concatenate(output2s_list)
-    md1s = np.concatenate(md1_list)
-    md2s = np.concatenate(md2_list)
+    df = pd.DataFrame(data)
+    return df[param_names].apply(lambda x: x.ravel()).values.T
 
-    return truths, predictions, output1s, output2s, img1s, img2s, md1s, md2s
+
+# def get_batch_data_hdf5(h5_filename, param_names):
+#     """
+#     Used to import data stored as hdf5 file.
+#     Parameters imported are all from during training or testing.
+#     truths: The label of similarity for input pair of images
+#     predictions: The predicted similarity by the model
+#     output1s: latent feature map output from first input image
+#     output2s: latent feature map output from second input image
+#     img1: first input image
+#     img2: second input image
+#     """
+
+#     lists = {name: np.array([]) for name in param_names}
+#     print(lists)
+#     with h5py.File(h5_filename, "r") as hf:
+#         for batch_id, batch_group in hf.items():
+#             for name in param_names:
+#                 try: 
+#                     batch_group[name]
+#                 except:
+#                     print(f"Parameter {name} not in file {h5_filename}")
+
+#                 if name in ["truths", "predictions"]:
+#                     lists[name] = np.concatenate((lists[name], batch_group[name][:].ravel()))
+#                 else:
+#                     lists[name] = np.concatenate((lists[name], batch_group[name][:]))
+                
+#                 #lists[name] = np.concatenate(lists[name])
+
+#     # truths_list, predictions_list, output1s_list, output2s_list = [], [], [], []
+#     # img1s_list, img2s_list = [], []
+#     # md1_list, md2_list = [], []
+#     # md1_list_raw, md2_list_raw = [], []
+#     # with h5py.File(h5_filename, "r") as hf:
+#     #     for batch_id, batch_group in hf.items():
+#     #         truths_list.append(batch_group["truths"][:].ravel())
+#     #         predictions_list.append(batch_group["predictions"][:].ravel())
+#     #         output1s_list.append(batch_group["out1"][:])
+#     #         output2s_list.append(batch_group["out2"][:])
+#     #         img1s_list.append(batch_group["img1"][:])
+#     #         img2s_list.append(batch_group["img2"][:])
+#     #         md1_list.append(batch_group["metadata1"][:])
+#     #         md2_list.append(batch_group["metadata2"][:])
+#     #         md1_list_raw.append(batch_group["metadata1_raw"][:])
+#     #         md2_list_raw.append(batch_group["metadata2_raw"][:])
+
+#     # truths = np.concatenate(truths_list)
+#     # predictions = np.concatenate(predictions_list)
+#     # img1s = np.concatenate(img1s_list)
+#     # img2s = np.concatenate(img2s_list)
+#     # output1s = np.concatenate(output1s_list)
+#     # output2s = np.concatenate(output2s_list)
+#     # md1s = np.concatenate(md1_list)
+#     # md2s = np.concatenate(md2_list)
+#     # md1s_raw = np.concatenate(md1_list_raw)
+#     # md2s_raw = np.concatenate(md2_list_raw)
+
+#     return lists #truths, predictions, output1s, output2s, img1s, img2s, md1s, md2s, md1s_raw, md2s_raw
 
 
 
@@ -135,24 +187,36 @@ def plot_training_evolution(h5_training_stats, output_dir, model_name):
     training_loss, validation_loss = [], []
     first_train_loss, second_train_loss = [], []
     first_val_loss, second_val_loss = [], []
+    
     with h5py.File(h5_training_stats, "r") as hf:
-        for batch_id, batch_group in hf.items():
-            training_loss.append(batch_group["training_loss"][:])
-            first_train_loss.append(batch_group["first_train_loss"][:])
-            second_train_loss.append(batch_group["second_train_loss"][:])
-            validation_loss.append(batch_group["validation_loss"][:])
-            first_val_loss.append(batch_group["first_val_loss"][:])
-            second_val_loss.append(batch_group["second_val_loss"][:])
+        hf_group = hf["all_batches"]
+        train_mse = hf_group["train_mse"][()]
+        val_mse = hf_group["validation_mse"][()]
+        epochs = hf_group["epoch"][()]
+
+        training_loss = hf_group["training_loss"][()]
+        first_train_loss = hf_group["first_train_loss"][()]
+        second_train_loss = hf_group["second_train_loss"][()]
+        validation_loss = hf_group["validation_loss"][()]
+        first_val_loss = hf_group["first_val_loss"][()]
+        second_val_loss = hf_group["second_val_loss"][()]
+        # for batch_id, batch_group in hf.items():
+        #     training_loss.append(batch_group["training_loss"][:])
+        #     first_train_loss.append(batch_group["first_train_loss"][:])
+        #     second_train_loss.append(batch_group["second_train_loss"][:])
+        #     validation_loss.append(batch_group["validation_loss"][:])
+        #     first_val_loss.append(batch_group["first_val_loss"][:])
+        #     second_val_loss.append(batch_group["second_val_loss"][:])
 
 
-    epochs = np.arange(1, len(training_loss[0])+1)
+    #epochs = np.arange(1, len(training_loss[0])+1)
     plt.figure()
-    plt.plot(epochs, training_loss[0], color="b", label="Training loss")
-    plt.plot(epochs, first_train_loss[0], '--', color="b", alpha=0.7, label="First part train")
-    plt.plot(epochs, second_train_loss[0], '-.', color="b", alpha=0.7, label="Second part train")
-    plt.plot(epochs, validation_loss[0], color="r", label="Validation loss")
-    plt.plot(epochs, first_val_loss[0], '--', color="r", alpha=0.7, label="First part val")
-    plt.plot(epochs, second_val_loss[0], '-.', color="r",  alpha=0.7, label="Second part val")
+    plt.plot(epochs, training_loss, color="b", label="Training loss")
+    plt.plot(epochs, first_train_loss, '--', color="b", alpha=0.7, label="First part train")
+    plt.plot(epochs, second_train_loss, '-.', color="b", alpha=0.7, label="Second part train")
+    plt.plot(epochs, validation_loss, color="r", label="Validation loss")
+    plt.plot(epochs, first_val_loss, '--', color="r", alpha=0.7, label="First part val")
+    plt.plot(epochs, second_val_loss, '-.', color="r",  alpha=0.7, label="Second part val")
     plt.legend()
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
@@ -162,6 +226,16 @@ def plot_training_evolution(h5_training_stats, output_dir, model_name):
           save_dir.mkdir(parents=True, exist_ok=True)
     plt.savefig(f"{save_dir}/training_evol.png")
     print(f"[INFO] Saved training evolution plot at {save_dir}/training_evol.png")
+
+    plt.figure()
+    plt.plot(epochs, train_mse, color="b", label="Train MSE")
+    plt.plot(epochs, val_mse, color="r", label="Validation MSE")
+    plt.legend()
+    plt.title(f"Model: {model_name}")
+    plt.xlabel("Epoch")
+    plt.ylabel("MSE")
+    plt.savefig(f"{save_dir}/MSEs.png")
+
 
 
 

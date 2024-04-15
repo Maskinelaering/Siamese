@@ -37,8 +37,8 @@ norm_type = "z_score" # minmax, z_score
 
 
 # min, max, mean and std values computed for each metadata parameter
-ar_s_stats = [4.920575656729093e-14 , 4.883139373160987e-13 , 1.5998683502328056e-13 , 5.853457864542639e-14] #[min, max, mean, std]
-ar_p_stats = [1.7612091524905243e-06 , 4.5039630181773166e-05 , 1.1237145560259502e-05 , 7.111484935601497e-06]
+ar_p_stats = [1.274263e-10 , 1.525225e-05 , 2.663110e-06, 2.644608e-06] #[min, max, mean, std]
+ar_s_stats = [1.999744e-14 , 6.386982e-13 , 1.702182e-13 , 7.274838e-14]
 mih_stats = [1.1012342557696856e+30 , 1.175988350929672e+32 , 2.262783690105513e+31 , 2.440384162054931e+31]
 m_stats = [4.747706220749683e-05 , 0.0006432782806819867 , 0.000423637317739924 , 0.00015939441534300718]
 ds_stats = [0.0 , 458.1103546350497 , 150.011442111849 , 94.89227491504303]
@@ -48,12 +48,14 @@ t_stats = [4.15463518978504 , 166.8422452216837 , 85.73724726640633 , 48.5294244
 
 # -------------- Metadata extraction ----------------
 
-def metadata_normalization(md_paths):
+def metadata_normalization(data_folders, name):
     
     """
     Calculate minimum and maximum for each parameter to normalize it. 
     Function not used in training loop
     """
+    if not isinstance(data_folders, list):
+        data_folders = [data_folders]
     
     print("Normalizing metadata...")
     metadata_files = []
@@ -65,37 +67,49 @@ def metadata_normalization(md_paths):
     sep = []
     t = []
 
-    for subfolder in md_paths:
-        with open(subfolder, 'rb') as f:
-            data = pickle.load(f)
-            metadata_files.append(data)
+    for data_folder in data_folders:
+        for subfolder in os.listdir(data_folder):
+            subfolder_path = os.path.join(data_folder, subfolder)
+            md_file = [os.path.join(data_folder, subfolder, f) for f in os.listdir(subfolder_path) if "characteristics" in f][0]
+            with open(md_file, 'rb') as f:
+                data = pickle.load(f)
+                metadata_files.append(data)
 
-            S = data
-            p = data["primary sink tag"]
+                S = data
+                p = data["primary sink tag"]
 
-            md_p = {"ar_p": S["accretion_rate_primary"], "ar_s": S["accretion_rate_secondary"].value,
-                    "mih" : S["mass_in_100"] , "m": S["rsink file"]["m"][p], "ds": S["disk size"],
-                    "sep": S["separation"].value, "t": S["t_after_formation"].value,
-                    }
+                md_p = {"ar_p": S["accretion_rate_primary"], "ar_s": S["accretion_rate_secondary"].value,
+                        "mih" : S["mass_in_100"] , "m": S["rsink file"]["m"][p], "ds": S["disk size"],
+                        "sep": S["separation"].value, "t": S["t_after_formation"].value,
+                        }
+                
+                MD = md_p
+                ar_p.append(MD['ar_p'])
+                ar_s.append(MD['ar_s'])
+                mih.append(MD['mih'])
+                m.append(MD['m'])
+                ds.append(MD['ds'])
+                sep.append(MD['sep'])
+                t.append(MD['t'])
             
-            MD = md_p
-            ar_p.append(MD['ar_p'])
-            ar_s.append(MD['ar_s'])
-            mih.append(MD['mih'])
-            m.append(MD['m'])
-            ds.append(MD['ds'])
-            sep.append(MD['sep'])
-            t.append(MD['t'])
-            
-
-    all_metadata = [ar_p, ar_s, mih, m, ds, sep, t]
-
     print(f"Gathered all {len(ar_p)} params")
+    all_metadata = [ar_p, ar_s, mih, m, ds, sep, t]
+    all_metadata_names = ['ar_p_stats', 'ar_s_stats', 'mih_stats', 'm_stats', 'ds_stats', 'sep_stats', 't_stats']
+
+    md_stats = {}
+    for i, metadata in enumerate(all_metadata):
+        md_stats[all_metadata_names[i]] = [np.min(metadata), np.max(metadata), np.mean(metadata), np.std(metadata)]
     
-    return all_metadata
+    md_stats_df = pd.DataFrame(md_stats, index=['min', 'max', 'mean', 'std'])
+    #md_stats_df = md_stats_df.T
+    save_file_df = f"/lustre/astro/antonmol/learning_stuff/siamese_networks/metadata_stats_{name}.csv"
+    md_stats_df.to_csv(save_file_df)
+    print(f"Saved metadata statistics at {save_file_df}")
+    
+    return md_stats_df
 
 
-def get_metadata(md, filetype="dataframe", norm_type="z_score"):
+def get_metadata(md, md_names, normalizer, filetype="dataframe", norm_type="z_score"):
     
     S = md
     p = md["primary sink tag"]
@@ -110,61 +124,96 @@ def get_metadata(md, filetype="dataframe", norm_type="z_score"):
     # e = math.sqrt((1-r/a))
     # OP = math.acos((a * (1-e**2) / r) - 1)
 
-    md_p_raw = {"ar_p": S['accretion_rate_primary'], 
-                    "ar_s": S['accretion_rate_secondary'].value, 
-                    "mih": S['mass_in_100'],
-                    "m": S["rsink file"]["m"][p], 
-                    "ds": S['disk size'], 
-                    "sep": S['separation'].value,
-                    "t": S['t_after_formation'].value, 
+    md_p_raw = {
+        "ar_p": S['accretion_rate_primary'], 
+        "ar_s": S['accretion_rate_secondary'].value, 
+        "mih": S['mass_in_100'],
+        "m": S["rsink file"]["m"][p], 
+        "ds": S['disk size'], 
+        "sep": S['separation'].value,
+        "t": S['t_after_formation'].value, 
                                 }
+
+
+    
 
     if norm_type == "minmax":
         
-        md_p = {"ar_p": (S['accretion_rate_primary'] - ar_p_stats[0]) / (ar_p_stats[1] - ar_p_stats[0]), 
-                "ar_s": ((S['accretion_rate_secondary'].value) - ar_s_stats[0]) / (ar_s_stats[1] - ar_s_stats[0]), 
-                "mih": ((S['mass_in_100']) - mih_stats[0]) / (mih_stats[1] - mih_stats[0]),
-                "m": ((S["rsink file"]["m"][p]) - m_stats[0]) / (m_stats[1] - m_stats[0]), 
-                "ds": ((S['disk size']) - ds_stats[0]) / (ds_stats[1] - ds_stats[0]), 
-                "sep": ((S['separation'].value) - sep_stats[0]) / (sep_stats[1] - sep_stats[0]),
-                "t": ((S['t_after_formation'].value) - t_stats[0]) / (t_stats[1] - t_stats[0]), 
+        md_p = {"ar_p": (S['accretion_rate_primary'] - normalizer["ar_p_stats"]["min"]) / 
+                (normalizer["ar_p_stats"]["max"] - normalizer["ar_p_stats"]["min"]), 
+
+                "ar_s": ((S['accretion_rate_secondary'].value) - normalizer["ar_s_stats"]["min"]) / 
+                (normalizer["ar_s_stats"]["max"] - normalizer["ar_s_stats"]["min"]), 
+
+                "mih": ((S['mass_in_100']) - normalizer["mih_stats"]["min"]) / 
+                (normalizer["mih_stats"]["max"] - normalizer["mih_stats"]["min"]),
+
+                "m": ((S["rsink file"]["m"][p]) - normalizer["m_stats"]["min"]) / 
+                (normalizer["m_stats"]["max"] - normalizer["m_stats"]["min"]), 
+
+                "ds": ((S['disk size']) - normalizer["ds_stats"]["min"]) / 
+                (normalizer["ds_stats"]["max"] - normalizer["ds_stats"]["min"]), 
+                "sep": ((S['separation'].value) - normalizer["sep_stats"]["min"]) / 
+                (normalizer["sep_stats"]["max"] - normalizer["sep_stats"]["min"]),
+
+                "t": ((S['t_after_formation'].value) - normalizer["t_stats"]["min"]) / 
+                (normalizer["t_stats"]["max"] - normalizer["t_stats"]["min"]), 
                                 }
         
     elif norm_type == "z_score":
     
 
-        md_p = {"ar_p": (S["accretion_rate_primary"] - ar_p_stats[2]) / (ar_p_stats[3]), 
-                "ar_s": (S["accretion_rate_secondary"].value - ar_p_stats[2]) / (ar_p_stats[3]),
-                "mih" : (S["mass_in_100"] - mih_stats[2]) / (mih_stats[3]),  
-                "m": (S["rsink file"]["m"][p] - m_stats[2]) / (m_stats[3]), 
-                "ds": (S["disk size"] - ds_stats[2]) / (ds_stats[3]),
-                "sep": (S["separation"].value - sep_stats[2]) / (sep_stats[3]), 
-                "t": (S["t_after_formation"].value - t_stats[2]) / (t_stats[3]),
+        md_p = {
+                "ar_p": (S["accretion_rate_primary"] - normalizer["ar_p_stats"]["mean"]) / (normalizer["ar_p_stats"]["std"]), 
+                "ar_s": (S["accretion_rate_secondary"].value - normalizer["ar_s_stats"]["mean"]) / (normalizer["ar_s_stats"]["std"]),
+                "mih" : (S["mass_in_100"] - normalizer["mih_stats"]["mean"]) / (normalizer["mih_stats"]["std"]),  
+                "m": (S["rsink file"]["m"][p] - normalizer["m_stats"]["mean"]) / (normalizer["m_stats"]["std"]), 
+                "ds": (S["disk size"] - normalizer["ds_stats"]["mean"]) / (normalizer["ds_stats"]["std"]),
+                "sep": (S["separation"].value - normalizer["sep_stats"]["mean"]) / (normalizer["sep_stats"]["mean"]), 
+                "t": (S["t_after_formation"].value - normalizer["t_stats"]["mean"]) / (normalizer["t_stats"]["std"]),
                     }
+        
+        # # old normalization
+        # md_p = {"ar_p": (S["accretion_rate_primary"] - ar_p_stats[2]) / (ar_p_stats[3]), 
+        #         "ar_s": (S["accretion_rate_secondary"].value - ar_s_stats[2]) / (ar_s_stats[3]),
+        #         "mih" : (S["mass_in_100"] - mih_stats[2]) / (mih_stats[3]),  
+        #         "m": (S["rsink file"]["m"][p] - m_stats[2]) / (m_stats[3]), 
+        #         "ds": (S["disk size"] - ds_stats[2]) / (ds_stats[3]),
+        #         "sep": (S["separation"].value - sep_stats[2]) / (sep_stats[3]), 
+        #         "t": (S["t_after_formation"].value - t_stats[2]) / (t_stats[3]),
+        #             }
 
+    elif norm_type == None:
+        md_p = md_p_raw
     
     if filetype == "dataframe":
-        primary_md = pd.DataFrame(md_p, index=["Primary"])
-        primary_md_raw = pd.DataFrame(md_p_raw, index=["Primary_raw"])
-        #secondary_md = pd.DataFrame(md_s, index=["Secondary"])
+        primary_md_all = pd.DataFrame(md_p, index=["Primary"])
+        primary_md_raw_all = pd.DataFrame(md_p_raw, index=["Primary_raw"])
+
+        primary_md = primary_md_all[md_names] # Only use those parameters defined in md_names
+        primary_md_raw = primary_md_raw_all[md_names]
+
+        #secondary_md = pd.DataFrame(md_s, index=["Secondary"]) 
         #metadata = pd.concat([primary_md, secondary_md])
-    
+  
     return primary_md, primary_md_raw
 
 # -------------- Similarity function --------------------
-def similarity_function(md1, md2, distance_function="cosine"):
+def similarity_function(md1, md2, md_names, normalizer, distance_function="cosine"):
 
-    MD1 = get_metadata(md1, filetype="dataframe", norm_type=norm_type)[:1]
-    MD2 = get_metadata(md2, filetype="dataframe", norm_type=norm_type)[:1]
+    MD1 = get_metadata(md1, md_names, normalizer, filetype="dataframe", norm_type=norm_type)[:1]
+    MD2 = get_metadata(md2, md_names, normalizer, filetype="dataframe", norm_type=norm_type)[:1]
     
-    MD1 = np.array(MD1)
-    MD2 = np.array(MD2)
-   
-    MD1_tensor = torch.tensor(np.array(MD1))[0]  # Convert MD1 to a PyTorch tensor
-    MD2_tensor = torch.tensor(np.array(MD2))[0]
+    MD1 = np.array(MD1)[0][0]
+    MD2 = np.array(MD2)[0][0]
+    
+    MD1_tensor = torch.tensor(MD1)  # Convert MD1 to a PyTorch tensor
+    MD2_tensor = torch.tensor(MD2)
 
+    # print("md1", MD1_tensor)
+    # print("md2", MD2_tensor)
     if distance_function == "cosine":
-        truth = F.cosine_similarity(MD1_tensor, MD2_tensor)
+        truth = F.cosine_similarity(MD1_tensor, MD2_tensor, dim=0)
         
         # truth = (1 + truth) / 2  # Mapping from [-1, 1] to [0, 1]
         # truth = 1-truth
@@ -184,9 +233,8 @@ def similarity_function(md1, md2, distance_function="cosine"):
         #truth = truth_tensor.numpy()
         #truth = truth.ravel()[0]
         
-        #print("TRUTH", truth)
+    #print("TRUTH", truth)
         
-
     return truth
 
 
@@ -212,11 +260,13 @@ class SetupData(Dataset):
     
     """
 
-    def __init__(self, data_folder: str, transform=None, fraction=0.01, distance_function="cosine"):
+    def __init__(self, data_folder: str, md_names, normalizer, transform=None, fraction=0.01, distance_function="cosine"):
         self.image_folder = data_folder
         self.image_paths = []
         self.md_paths = []
         self.distance_function = distance_function
+        self.md_names = md_names
+        self.normalizer = normalizer
         
         # Iterate over subfolders within data_folder
         all_subfolders = [subfolder for subfolder in os.listdir(data_folder) if os.path.isdir(os.path.join(data_folder, subfolder))]
@@ -254,8 +304,7 @@ class SetupData(Dataset):
             img1 = pickle.load(f)
         with open(self.image_paths[index2], 'rb') as f:
             img2 = pickle.load(f)
-
-        
+            
         # Load metadata
         with open(self.md_paths[index1], 'rb') as f:
             md1 = pickle.load(f)
@@ -277,14 +326,14 @@ class SetupData(Dataset):
 
         return img1, img2
     
-    def calculate_similarity(self, md1, md2, distance_function):
-        truth= similarity_function(md1, md2, distance_function)
+    def calculate_similarity(self, md1, md2, md_names, normalizer, distance_function):
+        truth= similarity_function(md1, md2, md_names, normalizer, distance_function)
         return truth
 
     def __getitem__(self, index):
         img1, img2, md1, md2 = self.load_data(index)
 
-        truth_label = self.calculate_similarity(md1, md2, self.distance_function)
+        truth_label = self.calculate_similarity(md1, md2, self.md_names, self.normalizer, self.distance_function)
 
         img1, img2 = self.normalize_images(img1, img2)
 
@@ -298,14 +347,16 @@ class SetupData(Dataset):
             img2 = self.transform(img2)
 
         # Get metadata
-        MD1, MD1_raw = get_metadata(md1, filetype="dataframe", norm_type=norm_type)
-        MD2, MD2_raw = get_metadata(md2, filetype="dataframe", norm_type=norm_type)
+        MD1, MD1_raw = get_metadata(md1, self.md_names, self.normalizer, filetype="dataframe", norm_type=norm_type)
+        MD2, MD2_raw = get_metadata(md2, self.md_names, self.normalizer, filetype="dataframe", norm_type=norm_type)
 
         return img1, img2, truth_label, np.array(MD1), np.array(MD2), np.array(MD1_raw), np.array(MD2_raw)
 
     
 
 def load_data(data_folder: str, 
+              md_names,
+              normalizer,
               data_type="pkl", 
               train_size=0.6, 
               transform=None, 
@@ -335,9 +386,11 @@ def load_data(data_folder: str,
     
     if data_type == "pkl":
         custom_dataset = SetupData(data_folder=data_folder, 
-                               transform=transform,
-                               fraction=train_size,
-                               distance_function=distance_function
+                                   md_names=md_names,
+                                   normalizer=normalizer,
+                                   transform=transform,
+                                   fraction=train_size,
+                                   distance_function=distance_function
                                )
     #else:
     #    custom_dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
@@ -387,6 +440,8 @@ def load_data(data_folder: str,
 
 def create_dataloaders(
     data_folder: str,
+    md_names,
+    normalizer,
     dataloader_dir: str,
     data_type: str,
     train_size: float,
@@ -416,6 +471,7 @@ def create_dataloaders(
     Example usage:
         train_dataloader, validation_dataloader = \
         = create_dataloaders(data_dir=path/to/data_dir,
+                                md_names=md_names
                                 data_type='pkl',
                                 train_size=0.8,
                                 transform=some_transform,
@@ -430,6 +486,7 @@ def create_dataloaders(
  
     if os.path.exists(train_dataloader_path) and os.path.exists(validation_dataloader_path):
         
+
         # If saved dataloaders exist, load them
         print("\nLoading dataloaders...")
         print(f"with train_size={train_size} and batch_size={batch_size}")
@@ -446,11 +503,13 @@ def create_dataloaders(
         print(f"with train_size={train_size} and batch_size={batch_size}")
         train_data, validation_data, test_data = \
             load_data(data_folder, 
-                        data_type, 
-                        train_size, 
-                        transform, 
-                        random_seed,
-                        distance_function
+                      md_names,
+                      normalizer,
+                      data_type, 
+                      train_size, 
+                      transform, 
+                      random_seed,
+                      distance_function,
                         )
         
         print(f"\nDataset created with {len(train_data)+len(validation_data)+len(test_data)} images with shape {train_data[0][0].shape}")

@@ -99,7 +99,11 @@ class ContrastiveLoss(nn.Module):
         return loss_contrastive, first_part, second_part
 
 
-    
+def triplet_loss():
+    """
+    Create a triplet loss function....
+    """
+    return
 
     
 
@@ -154,15 +158,21 @@ def training(model: nn.Module,
     training_losses = []
     first_train_losses = []
     second_train_losses = []
+    train_mses = []
 
     validation_losses = []
     first_val_losses = []
     second_val_losses = []
+    val_mses = []
+    epochs = []
+
     for epoch in range(num_epochs):
         model.train()
         training_loss_output = []
         train_first_output = []
         train_second_output = []
+        train_truths = []
+        train_predictions = []
 
         metadata1 = []
         metadata2 = []
@@ -192,18 +202,20 @@ def training(model: nn.Module,
             training_loss_output.append(torch.mean(training_loss).item())
             train_first_output.append(torch.mean(train_first).item())
             train_second_output.append(torch.mean(train_second).item())
-            
+            train_truths.append(sim_score.detach().cpu().numpy())
+            train_predictions.append(prediction.detach().cpu().numpy())
 
 
         training_loss = np.mean(training_loss_output) # Getting the mean loss for the batch
         first_training_loss = np.mean(train_first_output)
         second_training_loss = np.mean(train_second_output)
-
+        train_mse = metrics.mean_squared_error(np.concatenate(train_truths), np.concatenate(train_predictions))
         scheduler.step(training_loss) # Updates learning rate
 
         training_losses.append(training_loss)
         first_train_losses.append(first_training_loss)
         second_train_losses.append(second_training_loss)
+        train_mses.append(train_mse)
 
         if writer:
             # Add results to SummaryWriter
@@ -234,6 +246,8 @@ def training(model: nn.Module,
         validation_loss_output = []
         val_first_output = []
         val_second_output = []
+        val_truths = []
+        val_predictions = []
 
         for batch in validation_dataloader:
             val_img1, val_img2 = batch[0], batch[1]
@@ -253,8 +267,9 @@ def training(model: nn.Module,
                 validation_loss_output.append(torch.mean(validation_loss).item())
                 val_first_output.append(torch.mean(val_first).item())
                 val_second_output.append(torch.mean(val_second).item())
-
-
+                val_truths.append(val_sim_score.detach().cpu().numpy())
+                val_predictions.append(val_prediction.detach().cpu().numpy())
+        
             scaler.scale(torch.mean(validation_loss)).backward(retain_graph=True)
             scaler.step(optimizer)
             scaler.update()
@@ -262,23 +277,29 @@ def training(model: nn.Module,
         validation_loss = np.mean(validation_loss_output)
         first_val_loss = np.mean(val_first_output)
         second_val_loss = np.mean(val_second_output)
+        val_mse = metrics.mean_squared_error(np.concatenate(val_truths), np.concatenate(val_predictions))
+
         validation_losses.append(validation_loss)
         first_val_losses.append(first_val_loss)
         second_val_losses.append(second_val_loss)
+        val_mses.append(val_mse)
+        epochs.append(epoch+1)
 
         print(f'Epoch:{epoch+1}, Training Loss: {training_loss:.6f}, Validation Loss: {validation_loss:.6f}')
         
         h5_filename = os.path.join(output_dir, model_name, "training_stats.h5")
         os.makedirs(os.path.dirname(h5_filename), exist_ok=True)
         with h5py.File(h5_filename, "w") as hf:
-            batch_id = "All batches"
-            train_val_params = {"epoch": np.arange(1, num_epochs+1), 
+            batch_id = "all_batches"
+            train_val_params = {"epoch": epochs, 
                             "training_loss": training_losses, 
                             "first_train_loss": first_train_losses,
                             "second_train_loss": second_train_losses,
+                            "train_mse": train_mses,
                             "validation_loss": validation_losses,
                             "first_val_loss": first_val_losses,
                             "second_val_loss": second_val_losses,
+                            "validation_mse": val_mses,
                             }
             utils.save_batch_data_hdf5(hf, train_val_params, batch_id)
         if writer:
@@ -358,10 +379,8 @@ def create_writer(experiment_name: str,
 ##### --------------- Visualisations -------------------
 
 def calculate_mse_from_hdf5(h5_filename):
-    
     "Used to calculate the mean squared error of the truths vs. predictions"
-
-    truths, predictions = utils.get_batch_data_hdf5(h5_filename)[:2]
+    truths, predictions = utils.get_batch_data_hdf5(h5_filename, ["truths", "predictions"])
     print("Truth/prediction datapoints:", len(truths))
     if len(truths) >= 30:
         print("First 30 truths:", truths[0:30])
@@ -381,8 +400,8 @@ def create_clustering_plot(h5_filename, output_dir, model_name, id=None):
         of how the model ranks pairs based on similarity compared to the actual given similarity labels.
 
     """
+    truths, predictions = utils.get_batch_data_hdf5(h5_filename, ["truths", "predictions"])
     
-    truths, predictions = utils.get_batch_data_hdf5(h5_filename)[:2]
     save_dir = os.path.join(output_dir, model_name, "images")
     save_name = os.path.join(output_dir, model_name, "images")
     output_dir_path = Path(save_name)
@@ -422,9 +441,8 @@ def create_clustering_plot(h5_filename, output_dir, model_name, id=None):
 
 
 def visualize_embeddings(h5_filename, output_dir, model_name):
+    out1, out2 = utils.get_batch_data_hdf5(h5_filename, ["out1", "out2"])
 
-
-    truths, predictions, out1, out2 = utils.get_batch_data_hdf5(h5_filename)[:4]
     tsne = TSNE(n_components=2, random_state=42)
     embed = np.vstack((out1, out2)).T
 
@@ -484,6 +502,7 @@ def testing(model: nn.Module,
                       "out1": out1_batch, "out2": out2_batch,
                       "truths": truths_batch, "predictions": predictions_batch,
                       "metadata1": metadata1, "metadata2": metadata2,
+                      "metadata1_raw": metadata1_raw, "metadata2_raw": metadata2_raw,
                       }
             
             utils.save_batch_data_hdf5(hf, test_params, batch_id)
@@ -497,7 +516,7 @@ def testing(model: nn.Module,
     torch.cuda.empty_cache()
 
     # Run functions
-    mse = calculate_mse_from_hdf5(h5_filename)
+    mse = calculate_mse_from_hdf5(h5_filename, )
     print(f"Mean Squared Error: {mse}")
     
 

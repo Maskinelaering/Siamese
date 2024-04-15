@@ -23,7 +23,7 @@ This script is for tuning hyperparameters of a given model
 "---------------Step 1: Configure the search space and data -----------------"
 
 DATALOADER_DIR = "/lustre/astro/antonmol/learning_stuff/siamese_networks/dataloaders"
-TRAIN_SIZE = 0.2
+TRAIN_SIZE = 0.5
 
 data_setup.distance_function = "cosine"  # cosine, euclid
 
@@ -38,7 +38,7 @@ config = {
         "fc2": ray.tune.choice([128, 256]), #64, 128
         "lr": ray.tune.choice([8e-5]), #1e-4, 1e-3, 1e-2
         "batch_size": ray.tune.choice([4]), #4
-        "margin": ray.tune.choice([0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]), #0.7, 0.9, 1.1, 1.3, 1.5
+        "margin": ray.tune.choice([0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.3]), #0.7, 0.9, 1.1, 1.3, 1.5
 
     }
 
@@ -47,7 +47,7 @@ config = {
 # We also use the ASHAScheduler which will terminate bad performing trials early.
 
 
-MODEL_NAME = "SiameseNetwork_400_new_cosine"
+MODEL_NAME = "correct_data_test_run"
 data_setup.input_size = 400
 
 
@@ -85,7 +85,7 @@ def train_func(config, data_dir=DATALOADER_DIR):
     
     
     # Set model - NOTE: remember to change model name at the top as well, if changing model
-    model = model_builder.SiameseNetwork(config["l1"], config["l2"],
+    model = model_builder.SiameseNetwork_he_init_batchnorm(config["l1"], config["l2"],
                                          config["l3"], config["l4"],
                                          config["l5"], config["fc1"], 
                                          config["fc2"]
@@ -185,7 +185,9 @@ def train_func(config, data_dir=DATALOADER_DIR):
         #truths = truths.numpy()
         #predictions = np.array(predictions).flatten()
         #predictions = torch.cat(predictions, dim=0).numpy()
-        val_mse = metrics.mean_squared_error(truths, predictions)
+        # print("Truths", np.array(truths).shape)
+        # print("Predictions", np.array(predictions).shape)
+        val_mse = metrics.mean_squared_error(np.concatenate(truths), np.concatenate(predictions))
         # Report losses
         ray.train.report({"val_loss": validation_loss, "val_mse": val_mse})
         
@@ -201,8 +203,8 @@ def train_func(config, data_dir=DATALOADER_DIR):
 
 "---------------------Step 4: Tune!------------------------"
 checkpoint_dir = "/lustre/astro/antonmol/learning_stuff/siamese_networks/checkpoints"
-def main(num_samples=10, max_num_epochs=10, cpus=4, gpus_per_trial=1):
-    data_dir = DATALOADER_DIR
+def main(data_dir, num_samples=10, max_num_epochs=10, cpus=4, gpus_per_trial=1):
+    
     
     scheduler = ASHAScheduler(
         metric="val_mse",
@@ -270,12 +272,14 @@ if __name__ == "__main__":
     
     """
 
-    num_samples = 300
+    num_samples = 400
+    max_num_epochs = 10
+
     gpus_per_trial = 0.25
     cpus = 40 / (1/gpus_per_trial)
-    max_num_epochs = 5
-
-    result = main(num_samples=num_samples, 
+    
+    result = main(data_dir = DATALOADER_DIR,
+                  num_samples=num_samples, 
                   max_num_epochs=max_num_epochs, 
                   cpus=cpus, 
                   gpus_per_trial=gpus_per_trial)
