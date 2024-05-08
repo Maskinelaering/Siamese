@@ -1,22 +1,24 @@
 
 import torch
-import torch.nn as nn
+#import torch.nn as nn
 import torch.nn.functional as F
 
 from torchvision import transforms, datasets
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader, Subset, random_split
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
+#from sklearn.preprocessing import MinMaxScaler
 
 import pickle
 import os
 import tqdm as tqdm
 import itertools
 import pandas as pd
-from sklearn import metrics
+#from sklearn import metrics
 import random
-import math
+#import math
+import h5py
+import time
 
 """
 This script is for creating PyTorch dataloaders. 
@@ -26,7 +28,53 @@ will not be applied to existing dataloaders. When making changes, consider delet
 to be certain that all changes are applied.
 
 """
+save_dataset = True
+shuffle=True, # whether or not to shuffle batches between each epoch
+
+TRAIN_SIZE = 0.01
+BATCH_SIZE = 4
+NUM_WORKERS = 1
+NUM_EPOCHS = 10
+num_samples = 10
+MARGIN = 0.9
+PATIENCE = 5
+MIN_DELTA = 1e-3
+LR = 1e-4
+L1 = 32
+L2 = 32
+L3 = 128
+L4 = 64
+L5 = 128
+FC_UNITS1 = 512
+FC_UNITS2 = 128
+FC_UNITS3 = 1028
+FC_UNITS4 = 4096
+FC_UNITS5 = 128
+LEARNING_RATE = 1e-4
+targets = -1
+RANDOM_SEED = None
+output_dir = "/lustre/astro/antonmol/learning_stuff/siamese_networks/outputs"
+model_name = "just_testing"
+data_folder = "/lustre/astro/antonmol/atm_new_dataset_sink49"
+dataloader_dir = "/lustre/astro/antonmol/learning_stuff/siamese_networks/dataloaders"
+normalizer_file = "metadata_stats_sink49.csv"
+normalizer = pd.read_csv(f"/lustre/astro/antonmol/learning_stuff/siamese_networks/{normalizer_file}", index_col=0)
+
+
+
 input_size = 400
+transform = transforms.Compose([
+    transforms.ToTensor(),  # Convert images to PyTorch tensors
+    transforms.CenterCrop(input_size), # Crop image to 400x400 pixels 
+    #transforms.RandomRotation(45) # Randomly rotates between min/max of specified value
+    # NOTE: Remember to change model_builder.input_size accordingly, if changing size of image by cropping
+
+    # transforms.RandomErasing(),
+    # Add transform here
+])
+
+md_names = ["ar_p", "ar_s", "mih", "m", "ds", "sep", "t"]
+
 
 test_similarity = None
 
@@ -245,18 +293,6 @@ class SetupData(Dataset):
     This class is used to get all images within a target directory.
 
 
-    * Think about file types
-    * Think about naming
-    * Thing about how to connect them
-        - metadata for two images needs to be compared for each pair in order to estimate
-        similarity, so this has to be done when loading the pair.
-        - what is better then: 
-            * creating complete datasets of pairs, where each pair has a label of similarity or
-            * integrating into the training the similarity calculations - this will obviously
-            make the training longer and is not preferable.
-        conclusion = more advantageous to have a large dataset with labels, to make training faster
-        = This function should create that.
-
     
     """
 
@@ -267,11 +303,12 @@ class SetupData(Dataset):
         self.distance_function = distance_function
         self.md_names = md_names
         self.normalizer = normalizer
+        self.counter = 0
         
         # Iterate over subfolders within data_folder
         all_subfolders = [subfolder for subfolder in os.listdir(data_folder) if os.path.isdir(os.path.join(data_folder, subfolder))]
-
-        size = int(fraction * len(all_subfolders))
+        size = int(1 * len(all_subfolders))
+        #print(f"Getting {size} image pairs")
         selected_subfolders = random.sample(all_subfolders, size)
 
         for subfolder in selected_subfolders:
@@ -291,14 +328,23 @@ class SetupData(Dataset):
 
         # Create all possible pairs of indices
         # self.pairs = list(itertools.combinations(range(len(self.image_paths)), 2))
-        self.pairs = [tuple(random.sample(range(len(self.image_paths)), 2)) for _ in range(len(self.image_paths))]
+        print(f"There are {len(self.image_paths)} images")
+        total_combinations = (len(self.image_paths) * (len(self.image_paths) - 1)) / 2
+        print(f"...which gives {total_combinations} possible combinations.")
+        step_size = int(total_combinations / (fraction*len(self.image_paths)))
+        self.pairs = list(itertools.combinations(range(len(self.image_paths)), 2))[::step_size]
+        print(f"Taking only every combs/({fraction}*imgs)={step_size}th combination gives {len(self.pairs)} pairs")
 
+        
+        self.tenth_of_total = len(self.pairs) // 10
+        #self.pairs = [tuple(random.sample(range(len(self.image_paths)), 2)) for _ in range(len(self.image_paths))]
+        
         #self.all_metadata = metadata_normalization(self.md_paths)
 
     def load_data(self, index: int):
         "Opens an image and its metadata via a path and returns them."
         index1, index2 = self.pairs[index]
-
+        
         # Load image data
         with open(self.image_paths[index1], 'rb') as f:
             img1 = pickle.load(f)
@@ -310,6 +356,19 @@ class SetupData(Dataset):
             md1 = pickle.load(f)
         with open(self.md_paths[index2], 'rb') as f:
             md2 = pickle.load(f)
+
+        self.counter += 1
+
+        if self.counter == self.tenth_of_total:
+            self.start_time = time.time()
+        # Print progress at 10% intervals
+        if self.counter % self.tenth_of_total == 0:
+            print(f"Created {self.counter} out of {len(self.pairs)} image pairs")
+            if self.counter == self.tenth_of_total * 2:
+                end_time = time.time()
+                elapsed_time = end_time - self.start_time
+                print(f"It took {elapsed_time:.1f}s to create 10% of data.")
+
 
         return img1, img2, md1, md2
 
@@ -327,7 +386,7 @@ class SetupData(Dataset):
         return img1, img2
     
     def calculate_similarity(self, md1, md2, md_names, normalizer, distance_function):
-        truth= similarity_function(md1, md2, md_names, normalizer, distance_function)
+        truth = similarity_function(md1, md2, md_names, normalizer, distance_function)
         return truth
 
     def __getitem__(self, index):
@@ -399,13 +458,15 @@ def load_data(data_folder: str,
     if random_seed is not None:
         np.random.seed(random_seed)
     
-    val_size = 0.5 # 0.5 = Split validation and test sets evenly
-    if train_size == 0.01: # For testing set train size = 0.01 and test_size will follow
-        test_size = train_size
-    elif train_size < 0.5:
-        test_size = train_size # Make sure test is not larger than train
-    else:
-        test_size = 1-train_size # Use all data
+    # if train_size == 0.01: # For testing set train size = 0.01 and test_size will follow
+    #     test_size = train_size
+    # elif train_size < 0.5:
+    #     test_size = train_size # Make sure test is not larger than train
+    # else:
+    #     test_size = 1-train_size # Use all data
+
+    train_size = 0.5
+    test_size = 0.5
     
     # Split data into training and the rest
     train_dataset, temp_dataset = train_test_split(custom_dataset, 
@@ -414,6 +475,7 @@ def load_data(data_folder: str,
                                                     random_state=random_seed
     )
     # Split the remainder to equal sized validation and testing sets
+    val_size = 0.5 # 0.5 = Split validation and test sets evenly
     val_dataset, test_dataset = train_test_split(temp_dataset, 
                                                     train_size=val_size, 
                                                     test_size=val_size,
@@ -424,6 +486,19 @@ def load_data(data_folder: str,
 
 
 
+
+def save_datasets_hdf5(datasets, filename):
+    with h5py.File(filename, 'w') as f:
+        for name, dataset in datasets.items():
+            f.create_dataset(name, data=dataset)
+
+# Function to load datasets
+def load_datasets_hdf5(filename):
+    datasets = {}
+    with h5py.File(filename, 'r') as f:
+        for name in f.keys():
+            datasets[name] = f[name][:]
+    return datasets
 
 
 
@@ -480,23 +555,36 @@ def create_dataloaders(
     """
     
     # Check if saved dataloaders exist
-    train_dataloader_path = os.path.join(dataloader_dir, f"tsize{train_size}_bsize{batch_size}_train_{input_size}_{distance_function}.pth")
-    validation_dataloader_path = os.path.join(dataloader_dir, f"tsize{train_size}_bsize{batch_size}_validation_{input_size}_{distance_function}.pth")
-    test_dataloader_path = os.path.join(dataloader_dir, f"tsize{train_size}_bsize{batch_size}_test_{input_size}_{distance_function}.pth")
- 
-    if os.path.exists(train_dataloader_path) and os.path.exists(validation_dataloader_path):
+    train_dataloader_path = os.path.join(dataloader_dir, f"tsize{train_size}_bsize{batch_size}_train_{distance_function}_md_{md_names}.pth")
+    validation_dataloader_path = os.path.join(dataloader_dir, f"tsize{train_size}_bsize{batch_size}_validation_{distance_function}_md_{md_names}.pth")
+    test_dataloader_path = os.path.join(dataloader_dir, f"tsize{train_size}_bsize{batch_size}_test_{distance_function}_md_{md_names}.pth")
+
+    dataset_dir = "/lustre/astro/antonmol/learning_stuff/siamese_networks/datasets"
+    train_dataset_path = os.path.join(dataset_dir, f"tsize{train_size}_train_{distance_function}_md_{md_names}_datasets.pth")
+    validation_dataset_path = os.path.join(dataset_dir, f"tsize{train_size}_validation_{distance_function}_md_{md_names}_datasets.pth")
+    test_dataset_path = os.path.join(dataset_dir, f"tsize{train_size}_test_{distance_function}_md_{md_names}_datasets.pth")
+    
+    # if os.path.exists(train_dataloader_path) and os.path.exists(validation_dataloader_path):
         
+    #     # If saved dataloaders exist, load them
+    #     print("\nLoading dataloaders...")
+    #     print(f"with train_size={train_size} and batch_size={batch_size}")
 
-        # If saved dataloaders exist, load them
-        print("\nLoading dataloaders...")
-        print(f"with train_size={train_size} and batch_size={batch_size}")
+    #     train_dataloader = torch.load(train_dataloader_path)
+    #     validation_dataloader = torch.load(validation_dataloader_path)
+    #     test_dataloader = torch.load(test_dataloader_path)
 
-        train_dataloader = torch.load(train_dataloader_path)
-        validation_dataloader = torch.load(validation_dataloader_path)
-        test_dataloader = torch.load(test_dataloader_path)
+    #     print(f"\n[INFO] Loaded saved dataloaders with {len(train_dataloader)} training batches and {len(validation_dataloader)} validation batches with batch_size={batch_size}")
+    #     print(f"This gives a total of {len(train_dataloader.dataset)} training images and {len(validation_dataloader.dataset)} validation images")
+    #     return train_dataloader, validation_dataloader, test_dataloader
+    
+    if os.path.exists(train_dataset_path) and os.path.exists(validation_dataset_path): 
+        # Load datasets and create dataloaders
+        print("Loading dataset...")
+        train_data = torch.load(train_dataset_path)
+        validation_data = torch.load(validation_dataset_path)
+        test_data = torch.load(test_dataset_path)
 
-        print(f"\n[INFO] Loaded saved dataloaders with {len(train_dataloader)} training batches and {len(validation_dataloader)} validation batches with batch_size={batch_size}")
-        print(f"This gives a total of {len(train_dataloader.dataset)} training images and {len(validation_dataloader.dataset)} validation images")
     else:
         # Create new dataset (takes a while)
         print("Creating dataset...")
@@ -513,41 +601,49 @@ def create_dataloaders(
                         )
         
         print(f"\nDataset created with {len(train_data)+len(validation_data)+len(test_data)} images with shape {train_data[0][0].shape}")
+        
+        if save_dataset == True:
+            print("Saving datasets...")
+            torch.save(train_data, os.path.join(dataset_dir, f'tsize{train_size}_train_{distance_function}_md_{md_names}_datasets.pth'))
+            torch.save(validation_data, os.path.join(dataset_dir, f'tsize{train_size}_validation_{distance_function}_md_{md_names}_datasets.pth'))
+            torch.save(test_data, os.path.join(dataset_dir, f'tsize{train_size}_test_{distance_function}_md_{md_names}_datasets.pth'))
+            print(f"Saved datasets at {dataset_dir}")
 
-        # Turn images into data loaders
-        train_dataloader = DataLoader(
-            train_data,
-            batch_size=batch_size,
-            shuffle=False, # Set False to maintain the order of image pairs!
-            num_workers=num_workers,
-            pin_memory=True, # Set pin_memory to True for GPU acceleration
-        )
-        validation_dataloader = DataLoader(
-            validation_data,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=num_workers,
-            pin_memory=True,
-        )
-        test_dataloader = DataLoader(
-            test_data,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=num_workers,
-            pin_memory=True,
-        )
+    # Turn datasets into data loaders
+    print("Creating dataloaders")
+    train_dataloader = DataLoader(
+        train_data,
+        batch_size=batch_size,
+        shuffle=shuffle, # Set False to maintain the order of image pairs! Is this necessary?
+        num_workers=num_workers,
+        pin_memory=True, # Set pin_memory to True for GPU acceleration
+    )
+    validation_dataloader = DataLoader(
+        validation_data,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+    test_dataloader = DataLoader(
+        test_data,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
 
-        print(f"\n[INFO] Created dataloaders with {len(train_dataloader)} training batches and {len(validation_dataloader)} validation and test batches with batch_size={batch_size}")
-        print(f"This gives a total of {len(train_data)} training images and {len(validation_data)} validation and test images")
-        print("Saving dataloaders...")
-        # Check if the folder exists, create it if it doesn't
-        if not os.path.exists(dataloader_dir):
-            os.makedirs(dataloader_dir)
+    print(f"\n[INFO] Created dataloaders with {len(train_dataloader)} training batches and {len(validation_dataloader)} validation and test batches with batch_size={batch_size}")
+    print(f"This gives a total of {len(train_data)} training images and {len(validation_data)} validation and test images")
+    # print("Saving dataloaders...")
+    # # Check if the folder exists, create it if it doesn't
+    # if not os.path.exists(dataloader_dir):
+    #     os.makedirs(dataloader_dir)
 
-        # Save train and validation dataloaders
-        torch.save(train_dataloader, os.path.join(dataloader_dir, f"tsize{train_size}_bsize{batch_size}_train_{input_size}_{distance_function}.pth"))
-        torch.save(validation_dataloader, os.path.join(dataloader_dir, f"tsize{train_size}_bsize{batch_size}_validation_{input_size}_{distance_function}.pth"))
-        torch.save(test_dataloader, os.path.join(dataloader_dir, f"tsize{train_size}_bsize{batch_size}_test_{input_size}_{distance_function}.pth"))
-        print("Dataloaders saved at", dataloader_dir)
+    # # Save train and validation dataloaders
+    # torch.save(train_dataloader, os.path.join(dataloader_dir, f"tsize{train_size}_bsize{batch_size}_train_{distance_function}_md_{md_names}.pth"))
+    # torch.save(validation_dataloader, os.path.join(dataloader_dir, f"tsize{train_size}_bsize{batch_size}_validation_{distance_function}_md_{md_names}.pth"))
+    # torch.save(test_dataloader, os.path.join(dataloader_dir, f"tsize{train_size}_bsize{batch_size}_test_{distance_function}_md_{md_names}.pth"))
+    # print("Dataloaders saved at", dataloader_dir)
 
     return train_dataloader, validation_dataloader, test_dataloader

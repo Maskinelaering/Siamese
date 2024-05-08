@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 import os
+import re
 import matplotlib.pyplot as plt
 import tqdm as tqdm
 import h5py
@@ -61,18 +62,20 @@ def save_model(model: nn.Module,
     #assert model_name.endswith(".pth") or model_name.endswith(".pt"), "model_name should end with '.pt' or '.pth'"
 
     # Save the model state_dict()"
-    print(f"[INFO] Saving model to: {output_dir_path}")
+    
     model_savename = "{}/{}.pth".format(output_dir_path, model_name)  # Name of saved model
     torch.save(obj=model.state_dict(),
              f=model_savename)
 
-    # Save the model summary to a text file
-    #result, params_info = torchsummary.summary_string(model, [(1,800,800),(1,800,800)], device="cuda")
-    summary_filename = "{}/{}_summary.txt".format(output_dir_path, model_name)
-    
-    structure_df.to_csv(summary_filename, sep='\t', index=True, header=False)
-    # with open(summary_filename, 'w') as summary_file:
-    #     summary_file.write(structure_df)
+    if structure_df is not None:
+        print(f"[INFO] Saved model to: {output_dir_path}")
+        # Save the model summary to a text file
+        #result, params_info = torchsummary.summary_string(model, [(1,800,800),(1,800,800)], device="cuda")
+        summary_filename = "{}/{}_summary.txt".format(output_dir_path, model_name)
+        
+        structure_df.to_csv(summary_filename, sep='\t', index=True, header=False)
+        # with open(summary_filename, 'w') as summary_file:
+        #     summary_file.write(structure_df)
 
 
 
@@ -90,17 +93,15 @@ def save_batch_data_hdf5(hf, params: dict, batch_id: int):
         else:
             batch_group.create_dataset(f"{name}", data=param)
 
-    
+
 def get_batch_data_hdf5(h5_filename, param_names):
+
     """
-    Used to import data stored as hdf5 file.
-    Parameters imported are all from during training or testing.
-    truths: The label of similarity for input pair of images
-    predictions: The predicted similarity by the model
-    output1s: latent feature map output from first input image
-    output2s: latent feature map output from second input image
-    img1: first input image
-    img2: second input image
+    Returns specified items stored in h5_filename. Items must be specified with true keys in a list 
+    called param_names. Returns items in the same order as in param_names list.
+    
+    Example usage:
+    truths, predictions = utils.get_batch_data_hdf5(h5_filename, param_names = ["truths", "predictions"])
     """
 
     data = {name: [] for name in param_names}
@@ -114,13 +115,25 @@ def get_batch_data_hdf5(h5_filename, param_names):
                     print(f"Parameter {name} not in file {h5_filename}. \n Parameters: {batch_group.keys()}")
                     break
                 if name in ["truths", "predictions"]:
-                    data[name] = np.concatenate([batch_group[name][:].ravel()])
+                    data[name].append(batch_group[name][:].ravel())
                 else:
-                    data[name] = np.concatenate([batch_group[name][:]])
+                    data[name].append(batch_group[name][:])
 
-    df = pd.DataFrame(data)
-    return df[param_names].apply(lambda x: x.ravel()).values.T
+    # Convert lists to numpy arrays
+    try:
+        for name, array_list in data.items():
+           
+            # Check if the parameter is two-dimensional
+            if len(array_list[0].shape) > 1:
+                data[name] = np.vstack(array_list)
+            else:
+                data[name] = np.concatenate(array_list)
+    except:
+        print("\nSome of the saved hdf5 file items are empty. Skipping process. This might lead to further errors.\n")
+        return 
 
+    # Return only the specified parameters
+    return tuple(data[name] for name in param_names)
 
 # def get_batch_data_hdf5(h5_filename, param_names):
 #     """
@@ -134,22 +147,39 @@ def get_batch_data_hdf5(h5_filename, param_names):
 #     img2: second input image
 #     """
 
-#     lists = {name: np.array([]) for name in param_names}
-#     print(lists)
+#     data = {name: [] for name in param_names}
+
 #     with h5py.File(h5_filename, "r") as hf:
 #         for batch_id, batch_group in hf.items():
 #             for name in param_names:
 #                 try: 
 #                     batch_group[name]
 #                 except:
-#                     print(f"Parameter {name} not in file {h5_filename}")
-
+#                     print(f"Parameter {name} not in file {h5_filename}. \n Parameters: {batch_group.keys()}")
+#                     break
 #                 if name in ["truths", "predictions"]:
-#                     lists[name] = np.concatenate((lists[name], batch_group[name][:].ravel()))
+#                     data[name] = np.concatenate([batch_group[name][:].ravel()])
 #                 else:
-#                     lists[name] = np.concatenate((lists[name], batch_group[name][:]))
-                
-#                 #lists[name] = np.concatenate(lists[name])
+#                     data[name] = np.concatenate([batch_group[name][:]])
+#                     print(f"{name}", data[name])
+
+
+#     return np.column_stack([data[name] for name in param_names])
+#     # df = pd.DataFrame(data)
+    # return df[param_names].apply(lambda x: x.ravel()).values.T
+
+
+# def get_batch_data_hdf5(h5_filename, param_names):
+#     """
+#     Used to import data stored as hdf5 file.
+#     Parameters imported are all from during training or testing.
+#     truths: The label of similarity for input pair of images
+#     predictions: The predicted similarity by the model
+#     output1s: latent feature map output from first input image
+#     output2s: latent feature map output from second input image
+#     img1: first input image
+#     img2: second input image
+#     """
 
 #     # truths_list, predictions_list, output1s_list, output2s_list = [], [], [], []
 #     # img1s_list, img2s_list = [], []
@@ -179,7 +209,7 @@ def get_batch_data_hdf5(h5_filename, param_names):
 #     # md1s_raw = np.concatenate(md1_list_raw)
 #     # md2s_raw = np.concatenate(md2_list_raw)
 
-#     return lists #truths, predictions, output1s, output2s, img1s, img2s, md1s, md2s, md1s_raw, md2s_raw
+#     return #truths, predictions, output1s, output2s, img1s, img2s, md1s, md2s, md1s_raw, md2s_raw
 
 
 
@@ -187,6 +217,7 @@ def plot_training_evolution(h5_training_stats, output_dir, model_name):
     training_loss, validation_loss = [], []
     first_train_loss, second_train_loss = [], []
     first_val_loss, second_val_loss = [], []
+    
     
     with h5py.File(h5_training_stats, "r") as hf:
         hf_group = hf["all_batches"]
@@ -200,6 +231,15 @@ def plot_training_evolution(h5_training_stats, output_dir, model_name):
         validation_loss = hf_group["validation_loss"][()]
         first_val_loss = hf_group["first_val_loss"][()]
         second_val_loss = hf_group["second_val_loss"][()]
+
+        try:
+            train_reconstruction_loss = hf_group["train_reconstruction_loss"][()]
+            validation_reconstruction_loss = hf_group["validation_reconstruction_losses"][()]
+            SA = True
+        except:
+            SA = False
+
+
         # for batch_id, batch_group in hf.items():
         #     training_loss.append(batch_group["training_loss"][:])
         #     first_train_loss.append(batch_group["first_train_loss"][:])
@@ -217,7 +257,12 @@ def plot_training_evolution(h5_training_stats, output_dir, model_name):
     plt.plot(epochs, validation_loss, color="r", label="Validation loss")
     plt.plot(epochs, first_val_loss, '--', color="r", alpha=0.7, label="First part val")
     plt.plot(epochs, second_val_loss, '-.', color="r",  alpha=0.7, label="Second part val")
+    if SA:
+        plt.plot(epochs, train_reconstruction_loss, '-x', color="b", alpha=0.7, label="Autoencoder train loss")
+        plt.plot(epochs, validation_reconstruction_loss, '-x', color="b", alpha=0.7, label="Autoencoder val loss")
     plt.legend()
+    # plt.yscale("log")
+    # plt.xscale("log")
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.title(f"Model: {model_name}")
@@ -252,6 +297,9 @@ def plot_attr(model,
               targets: list,
               layer=None,
               method="FC2",
+              sign="all",
+              summing=False,
+              plot=True,
               ):
 
     """
@@ -297,7 +345,7 @@ def plot_attr(model,
 
     checkpoint = torch.load(f"{output_dir}/{model_name}/{model_name}.pth")
 
-    def running(image_number, target):
+    def running(image_number, target, sign):
         """
         This function runs the integrated gradients analysis for one of the input images
         and will run twice to analyse both images.
@@ -320,12 +368,15 @@ def plot_attr(model,
         
         if method == "FC2":
             grad = IntegratedGradients(combined_forward)
-            save_name = os.path.join(vis_folder, f"attr_{method}_tar{target}_img{image_number}.png")
-            summed = False
+            save_name = os.path.join(vis_folder, f"attr_{method}_tar{target}_{sign}_img{image_number}.png")
+            if summing == True:
+                summed = True
         elif method == "layer":
-            grad = LayerIntegratedGradients(combined_forward, layer)
+            grad = LayerIntegratedGradients(combined_forward, layer,
+                                            multiply_by_inputs=False
+                                            )
             summed = True
-            save_name = os.path.join(vis_folder, f"attr_{method}_summed_img{image_number}.png")
+            save_name = os.path.join(vis_folder, f"attr_{method}_{layer}_{sign}_summed_img{image_number}.png")
         
         
         if summed == True:
@@ -371,31 +422,66 @@ def plot_attr(model,
             plt.imshow(attrib)
             plt.savefig(save_name)
         else:    
-            figure, axis = viz.visualize_image_attr(attrib, origin, method="blended_heat_map",sign="all",
-                                    show_colorbar=True, title=f"Overlayed Integrated Gradients\nMethod: {method}")
+            import matplotlib as mpl
+            c_white = mpl.colors.colorConverter.to_rgba('white',alpha = 0)
+            c_black= mpl.colors.colorConverter.to_rgba('green',alpha = 1)
+            cmap_rb = mpl.colors.LinearSegmentedColormap.from_list('rb_cmap',[c_white,c_black],64)
+
+            c_white = mpl.colors.colorConverter.to_rgba('red',alpha = 1)
+            c_black= mpl.colors.colorConverter.to_rgba('green',alpha = 1)
+            cmap_rg = mpl.colors.LinearSegmentedColormap.from_list('rb_cmap',[c_white,c_black],64)
+            if method == "layer":
+                figure, axis = viz.visualize_image_attr(attrib, origin, method="blended_heat_map", sign=sign,
+                                                    alpha_overlay=0.3, show_colorbar=True,# cmap=cmap_rb,
+                                                    title=f"Overlayed Integrated Gradients\nImage: {image_number}\nMethod: {method}\nTarget layer: \n{layer}",
+                                    )
+            elif method == "FC2":
+                figure, axis = viz.visualize_image_attr(attrib, origin, method="blended_heat_map", sign=sign,
+                                                        alpha_overlay=0.3, show_colorbar=True,# cmap=cmap_rb,
+                                                        title=f"Overlayed Integrated Gradients\nImage: {image_number}\nMethod: {method}\nTarget(s): {target}",
+                                        )
+            axis.set_xlim(150, 250)
+            axis.set_ylim(150, 250)
             
             figure.savefig(save_name)
             print(f"Saved attributions figure at {save_name}")
             plt.close()
+        return attrib
 
     # Running for each input image
+    attribs0 = []
+    attribs1 = []
     if method == "layer":
-        running(0, targets)
-        running(1, targets)
+        attrib0 = running(0, targets, sign)
+        attrib1 = running(1, targets, sign)
+        attribs0.append(attrib0)
+        attribs1.append(attrib1)
     else:
-        for target in targets:
-            target = int(target)
-            running(0, target)
-            running(1, target)
+        if summing == True:
+            attrib0 = running(0, targets, sign)
+            attrib1 = running(1, targets, sign)
+            attribs0.append(attrib0)
+            attribs1.append(attrib1)
+        else:
+            for target in targets:
+                target = int(target)
+                attrib0 = running(0, target, sign)
+                attrib1 = running(1, target, sign)
+                attribs0.append(attrib0)
+                attribs1.append(attrib1)
+    return attribs0, attribs1
 
 
 
-def animate_attr(output_dir, model_name, n, save=False):
+def animate_attr(output_dir, model_name, n, method, save=False):
     # Get a list of all image files in the directory containing "imgn" in their name
-    image_dir = os.path.join(output_dir, model_name, "images", "visuals")
-    image_files = glob.glob(os.path.join(image_dir, f"*img{n}*.png"))
+    image_dir = os.path.join(output_dir, model_name, "images", "attributions")
+    if method == "layer":
+        image_files = glob.glob(os.path.join(image_dir, f"*summed_img{n}*.png"))
+    elif method == "FC2":
+        image_files = glob.glob(os.path.join(image_dir, f"*img{n}*.png"))
     image_files.sort()
-
+    print(image_files)
     fig, ax = plt.subplots(figsize=(6, 6))
     plt.axis('off')
 
@@ -484,7 +570,8 @@ def plot_x_best(h5_filename, output_dir, model_name, sorter="truths", order="low
                         indices.append((group_key, index))
 
     # Retrieve the corresponding image pairs for the lowest/highest values
-    with h5py.File(h5_filename, "r") as hf:
+    h5_image_file = os.path.join(output_dir, model_name, "batch_images.h5")
+    with h5py.File(h5_image_file, "r") as hf:
         plt.figure(figsize=(20, 4))
         for i, (group_key, index) in enumerate(indices):
             group = hf[group_key]
@@ -519,3 +606,202 @@ def plot_x_best(h5_filename, output_dir, model_name, sorter="truths", order="low
         plt.tight_layout()
         
         plt.savefig(save_name)
+
+
+
+
+
+def plot_gradient_evol(model_parameter_df,
+                       output_dir,
+                       model_name,): 
+    mean_gradient_norms = model_parameter_df.mean()
+    std_gradient_norms = model_parameter_df.std()
+
+    threshold = 3 * std_gradient_norms  
+    
+    plt.figure(figsize=(10, 6))
+    for column in model_parameter_df.columns:
+        plt.plot(model_parameter_df.index, model_parameter_df[column], label=column)
+
+    # Identify epochs with large increases or decreases
+    large_increases = model_parameter_df[model_parameter_df.diff() > threshold]
+    large_decreases = model_parameter_df[model_parameter_df.diff() < -threshold]
+
+    # Add markers for large increases
+    for index, row in large_increases.iterrows():
+        plt.scatter([index] * len(row), row.values, color='red', marker='^')
+
+    # Add markers for large decreases
+    for index, row in large_decreases.iterrows():
+        plt.scatter([index] * len(row), row.values, color='blue', marker='v')
+
+    plt.xlabel('Epoch')
+    plt.ylabel('Gradient Norm')
+    plt.yscale('log')
+    plt.title('Gradient Norms over Epochs')
+    plt.legend(loc='upper right', bbox_to_anchor=(1.3, 1))
+    save_file = os.path.join(output_dir, model_name, "images", "gradient_evolution")
+    plt.savefig(save_file, bbox_inches='tight')
+
+
+
+def get_kps(input_size, n_configs, target_size, ks,
+            K2=None, K3=None, P2=None, P3=None, S2=None, S3=None):
+    def calculate_input_size(input_size, kernel_sizes, paddings, strides):
+        for i, (k, p, s) in enumerate(zip(kernel_sizes, paddings, strides)):
+            if (i+1)%2 == 0:
+                input_size = ((input_size + 2*p - (k-1) - 1) // s) + 1
+            else: 
+                input_size = ((input_size + 2*p - k) // s) + 1
+        return input_size
+
+    init_kernel_sizes = [3, None, None, 3, 3]
+    init_paddings = [1, None, None, 1, 1]
+    init_strides = [1, None, None, 1, 1]
+    possible_combinations = []
+    for k2 in ks:
+        for k3 in ks:
+            for p2 in range(1, n_configs + 1):
+                for p3 in range(1, n_configs + 1):
+                    for s2 in range(1, 5):
+                        for s3 in range(1, 5):
+                            kernel_sizes = [3, 3, k2, 3, k3, 3, 3, 3, 3]
+                            paddings = [1, 1, p2, 1, p3, 1, 1, 1, 1]
+                            strides = [1, 2, s2, 2, s3, 2, 1, 2, 1]
+                            if calculate_input_size(input_size, kernel_sizes, paddings, strides) == target_size:
+                                possible_combination = [kernel_sizes, paddings, strides]
+                                #print(possible_combination)
+                                possible_combinations.append(possible_combination)
+
+
+    specified_kernel_sizes = [3, 3, K2, 3, K3, 3, 3, 3, 3]
+    specified_paddings = [1, 1, P2, 1, P3, 1, 1, 1, 1]
+    specified_strides = [1, 2, S2, 2, S3, 2, 1, 2, 1]
+    combs = []
+    for combination in possible_combinations:
+        # Check if the combination matches the specified partial combination
+        if (all(x is None or x == y for x, y in zip(specified_kernel_sizes, combination[0])) and
+            all(x is None or x == y for x, y in zip(specified_paddings, combination[1])) and
+            all(x is None or x == y for x, y in zip(specified_strides, combination[2]))):
+            combs.append(combination)
+
+    # print(f"{len(possible_combinations)} number of possible combinations for")
+    # print("Kernel sizes: ",init_kernel_sizes)
+    # print("Paddings: ",init_paddings)
+    # print("Strides: ",init_strides)
+
+    # print(f"\n{len(combs)} number of possible combinations for")
+    # print("Kernel sizes: ",specified_kernel_sizes)
+    # print("Paddings: ",specified_paddings)
+    # print("Strides: ",specified_strides)
+
+
+    return possible_combinations, combs
+
+
+
+
+def plot_accuracy(h5_filename, output_dir, model_name, lower_limit=0.9, upper_limit=1.0, bins=10, plot=True):
+    
+    truths, predictions = get_batch_data_hdf5(h5_filename, ["truths", "predictions"])
+
+    top_truths = truths[np.where((predictions >= 0.9) & (predictions <= 1.0))]
+    top_predictions = predictions[np.where((predictions >= 0.9) & (predictions <= 1.0))]
+    
+    truths = truths[np.where((predictions >= lower_limit) & (predictions <= upper_limit))]
+    predictions = predictions[np.where((predictions >= lower_limit) & (predictions <= upper_limit))]
+    
+    errors = np.linspace(0, 1.0, bins+1)
+
+    if not np.any((np.array(np.round(truths * 100) / 100) != 1.) & (np.array(np.round(truths * 100) / 100) != -1.)):
+        #print("Only 1s and -1s for truths")
+        return np.zeros(len(errors)), np.zeros(len(errors))
+
+ 
+    def scoring(errors, truths, predictions):
+        acc_sums = []
+        acc_means = []
+        for i, error in enumerate(errors):
+            true_scores = []
+            for t, p in zip(truths, predictions):
+                if i == 0 and abs(t-p) < error:
+                    score = 1
+                elif abs(t-p) < error and abs(t-p) >= errors[i-1]:
+                    score = 1
+                else:
+                    score = 0
+                true_scores.append(score)
+            acc_mean = np.sum(true_scores) / len(true_scores)  
+            acc_means.append(acc_mean)
+            acc_sums.append(np.sum(true_scores))
+        return acc_means, acc_sums
+
+    acc_means, acc_sums = scoring(errors, truths, predictions)
+
+    if plot == True:
+        plt.figure(figsize=(8,5))
+
+        bars1 = plt.bar(np.linspace(-0.1, 0.9, bins+1), acc_sums, width=0.1, align="edge", label="Number of correct guesses within error")
+        for i, rect in enumerate(bars1):
+            height = rect.get_height()
+            if height != 0:
+                total_sum = np.sum(acc_sums)
+                percentage = height / total_sum * 100
+                plt.text(rect.get_x() + rect.get_width() / 2, height, f'{percentage:.2f}%',
+                        ha='center', va='bottom')
+                
+        if not lower_limit == 0.9 and upper_limit == 1.0:
+            top_acc_means, top_acc_sums = scoring(errors, top_truths, top_predictions)
+            top_total_sum = np.sum(top_acc_sums)
+            bars2 = plt.bar(np.linspace(-0.1, 0.9, bins+1), top_acc_sums, width=0.1, align="edge", alpha=0.5, label="Top predictions above 0.9")
+            for i, rect in enumerate(bars2):
+                height = rect.get_height()
+                if height != 0:
+                    percentage = height / top_total_sum * 100
+                    if percentage >= 1.0:
+                        plt.text(rect.get_x() + rect.get_width() / 2, height, f'{percentage:.2f}%',
+                                ha='center', va='bottom', color='white')
+        plt.legend()
+        plt.xlim(-0.05, 1.05)
+        plt.xlabel("Error")
+        plt.ylabel("Counts")
+        plt.title(f"Model accuracy as function of error for\npredictions in limit [{lower_limit}:{upper_limit}]\n\nExperiment: {model_name}")
+        save_dir = os.path.join(output_dir, model_name, "images")
+        plt.savefig(os.path.join(save_dir, "accuracies.png"))
+        
+    return acc_means, acc_sums
+
+
+
+
+
+
+def get_md_experiment(all_configs, search="remaining"):
+    all_folders = os.listdir("/lustre/astro/antonmol/learning_stuff/siamese_networks/outputs/_experiments/metadata")
+    elements_list = []
+    
+    if search == None:
+        return all_configs
+    
+    if search == "remaining":
+        for folder_name in all_folders:
+            elements_list_match = re.search(r'\[.*?\]', folder_name)
+            if elements_list_match:
+                elements_list_str = elements_list_match.group(0)  # Extract the matched string
+                elements_list.append(eval(elements_list_str))  # Convert the string to a list
+
+    remaining_configs = []
+    for config in all_configs:
+        if config not in elements_list:
+            remaining_configs.append(config)
+
+    print("remain", remaining_configs)
+    all_configs = remaining_configs[::-1]
+    if search == "remaining":
+        print(f"Running for remaining {len(all_configs)} MD configs:")
+    else:
+        if search is not None:
+            print("Running for:")
+    print(all_configs)
+    
+    return all_configs

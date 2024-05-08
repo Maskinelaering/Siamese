@@ -65,19 +65,26 @@ def plot_results(output_dir,
                  md_names,
                  h5_match,
                  nsamp,
+                 threshold,
                  target_sink,
                  target_snapshot,
                  rank,
                  ):
     
     
-    predictions, target_imgs, img2s, target_metadata, md2s, target_metadata_raw,  md2s_raw, \
-        = utils.get_batch_data_hdf5(h5_match, ["predictions", "img1", "img2", "metadata1", "metadata2", "metadata1_raw", "metadata2_raw"])
-
-
+    truths, predictions, target_metadata, md2s, target_metadata_raw,  md2s_raw, \
+        = utils.get_batch_data_hdf5(h5_match, ["truths", "predictions", "metadata1", "metadata2", "metadata1_raw", "metadata2_raw"])
+    
+    target_imgs, img2s = utils.get_batch_data_hdf5(h5_match, ["img1", "img2"])
+    
     if rank == "best":
-        #ranked_pred_index = np.argsort(predictions)[::-1][:nsamp] # find the index of the best n predictions
-        ranked_pred_index = np.where(predictions >= nsamp)[0]
+        if threshold:
+            ranked_pred_index = np.where(predictions >= threshold)[0]
+            print(f"Matching {len(ranked_pred_index)} images above threshold {threshold}")
+        else:
+            ranked_pred_index = np.argsort(predictions)[::-1][:nsamp] # find the index of the best n predictions
+            print(f"Matching {len(ranked_pred_index)} highest predictions")
+        
     elif rank == "random":
         try:
             ranked_pred_index = np.random.choice(np.arange(len(predictions)), size=nsamp, replace=False)
@@ -86,15 +93,11 @@ def plot_results(output_dir,
             return
 
     ranked_predictions = predictions[ranked_pred_index]
+    ranked_truths = truths[ranked_pred_index]
     
     avg_pred = np.mean(ranked_predictions)
     ranked_matches = img2s[ranked_pred_index]
-    threshold = np.min(ranked_predictions)
-
-    # sorted_index = np.argsort(predictions[ranked_pred_index])[::-1]
-    # ranked_predictions = ranked_predictions[sorted_index]
-    # ranked_matches = ranked_matches[sorted_index]
-    #ranked_matches = ranked_matches[ranked_pred_index]
+    
     print("Rank:", rank)
     print("ranked predictions", ranked_predictions)
     
@@ -142,19 +145,18 @@ def plot_results(output_dir,
         
     save_file = os.path.join(save_dir_target, f"target_sink{target_sink}_{target_snapshot}_{rank}.png")
     plt.figure(figsize=(10,10))
-    print("MDraaw", md2s_raw.shape)
     for i in range(len(md2s_raw[0][0])):
         metadata = md2s_raw[ranked_pred_index][:,0,i]
-        target_md = target_metadata_raw[[0][i]]
+        target_md = target_metadata_raw[0][i]
         if md_names[i] == "ar_s": 
             metadata = np.array(metadata)/31557600 # convert units...
-            target_metadata = np.array(target_md)/31557600
+            target_md = np.array(target_md)/31557600
         if md_names[i] == "mih": 
             metadata = np.array(metadata)/1.989e33
-            target_metadata = np.array(target_md)/1.989e33
+            target_md = np.array(target_md)/1.989e33
         if md_names[i] == "m": 
             metadata = np.array(metadata)*3000
-            target_metadata = np.array(target_md)*3000
+            target_md = np.array(target_md)*3000
 
         bins = 30
         if md_names[i] in log_titles:
@@ -166,14 +168,14 @@ def plot_results(output_dir,
         plt.hist(metadata[0:30], bins=bins, color="r", label="Best 30 matches")
         
         high_count = np.histogram(metadata, bins=bins)[0].max()
-        plt.vlines(target_metadata, 0, high_count, color="r", ls="--", label="Target")    
+        plt.vlines(target_md, 0, high_count, color="r", ls="--", label="Target")    
         if md_names[i] in log_titles:
             plt.xscale("log")        
         plt.title(title_mapping.get(md_names[i], "Not defined"))
         plt.legend()
     
     if rank == "best":
-        plt.suptitle(f"Target: Sink {target_sink} snapshot {target_snapshot}\nAvg. pred: {avg_pred:.4f}\n from {len(ranked_predictions)} matches above threshold {threshold:2f}")
+        plt.suptitle(f"Target: Sink {target_sink} snapshot {target_snapshot}\nAvg. pred: {avg_pred:.4f}\n from {len(ranked_predictions)} matches above threshold {threshold}")
     elif rank == "random":
         plt.suptitle(f"Target: Sink {target_sink} snapshot {target_snapshot}\nAvg. pred: {avg_pred:.4f}\n from {len(ranked_predictions)} random matches")
     
@@ -192,8 +194,8 @@ def plot_results(output_dir,
     plt.figure(figsize=(10,10))
     for i in range(len(md2s[0][0])):
         metadata = md2s[ranked_pred_index][:,0,i]
-        target_metadata = target_metadata[0][i]
-        param = target_metadata*metadata
+        target_md = target_metadata[0][i]
+        param = target_md*metadata
         plt.subplot(3,3,i+1)
         plt.hist(param, bins=50)
         plt.title(title_mapping.get(md_names[i], "Not defined"))
@@ -214,13 +216,14 @@ def plot_results(output_dir,
     plt.title(f"Target image")
     for i, img in enumerate(ranked_matches):
         plt.subplot(3,3,i+2); plt.imshow(img[0])
-        plt.title(f"Prediction: {ranked_predictions[i]:.3f}")
+        plt.title(f"Prediction: {ranked_predictions[i]:.3f}\nTruth: {ranked_truths[i]:.3f}")
         if i >= 7:
             break
     if rank == "best":
         plt.suptitle(f"Target: Sink {target_sink} snapshot {target_snapshot}\ncompared to best matches from sink 49")
     elif rank == "random":
         plt.suptitle(f"Target: Sink {target_sink} snapshot {target_snapshot}\ncompared to best of random matches from sink 49")
+    plt.tight_layout()
     plt.savefig(save_file_comp)
     print(f"Saved images at {save_file_comp}")
 
@@ -243,6 +246,7 @@ def run(output_dir,
         batch_size,
         device,
         nsamp,
+        threshold,
         ):
 
     for target_snapshot in target_snapshots:
@@ -292,7 +296,16 @@ def run(output_dir,
                             "metadata1": target_md, "metadata2": md2_batch,
                             "metadata1_raw": target_md_raw, "metadata2_raw": md2_batch_raw,
                             }
+                for key, value in test_params.items():
+                    # Check if the value is a tensor and if it's empty
+                    if isinstance(value, torch.Tensor) and value.numel() == 0:
+                        print(f"The tensor {key} is empty.")
+                    # Check if the value is empty (e.g., None, empty list, empty string, etc.)
+                    elif value is None or (isinstance(value, str) and not value) or (isinstance(value, list) and not value):
+                        print(f"The variable {key} is empty.")
+
                 utils.save_batch_data_hdf5(hf, test_params, batch_id)
+                
         print(f"Saved outputs at {h5_match}")
 
         for rank in ["best", "random"]:
@@ -300,7 +313,8 @@ def run(output_dir,
                         model_name, 
                         md_names,
                         h5_match, 
-                        nsamp, 
+                        nsamp,
+                        threshold,
                         target_sink, 
                         target_snapshot, 
                         rank)
@@ -310,11 +324,12 @@ def run(output_dir,
 
 if __name__ == "__main__":
 
-    TRAIN_SIZE = 0.4
-    nsamp = 100 # number of top predictions to plot
+    TRAIN_SIZE = 0.62
+    nsamp = 50 # number of top predictions to plot
+    threshold = None # if threshold, overwrite nsamp and pick only matches with prediction above threshold
     BATCH_SIZE = 4
 
-    target_sink = "49"
+    target_sink = "91"
     target_snapshots = ["000444", "000555", "000655", "000788"]
     target_projection = "3"
 
@@ -323,7 +338,7 @@ if __name__ == "__main__":
     dataloader_dir = "/lustre/astro/antonmol/learning_stuff/siamese_networks/dataloaders"
     output_dir = "/lustre/astro/antonmol/learning_stuff/siamese_networks/outputs"
     data_folder = "/lustre/astro/antonmol/atm_new_dataset_sink49"
-    model_name = "experiment_new_data"
+    model_name = "correct_data_test_run2"
     data_type = "pkl"
     DISTANCE_FUNCTION = data_setup.distance_function  # cosine, euclid
     md_names = [
@@ -387,6 +402,7 @@ if __name__ == "__main__":
         BATCH_SIZE,
         device,
         nsamp,
+        threshold,
         )
 
 

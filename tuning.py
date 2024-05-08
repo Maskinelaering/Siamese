@@ -22,76 +22,97 @@ This script is for tuning hyperparameters of a given model
 """
 "---------------Step 1: Configure the search space and data -----------------"
 
-DATALOADER_DIR = "/lustre/astro/antonmol/learning_stuff/siamese_networks/dataloaders"
-TRAIN_SIZE = 0.5
+DATASET_DIR = "/lustre/astro/antonmol/learning_stuff/siamese_networks/datasets"
+TRAIN_SIZE = 0.2
 
-data_setup.distance_function = "cosine"  # cosine, euclid
+#data_setup.distance_function = "cosine"  # cosine, euclid
 
 
 config = {
-        "l1": ray.tune.choice([16, 32]), #16, 32
-        "l2": ray.tune.choice([32, 64]), #32, 64
-        "l3": ray.tune.choice([32, 64]), #32, 64, 128
-        "l4": ray.tune.choice([32, 64]), #32, 64, 128
-        "l5": ray.tune.choice([128]), #64, 128, 256
-        "fc1": ray.tune.choice([256, 512]), #512, 1024
-        "fc2": ray.tune.choice([128, 256]), #64, 128
-        "lr": ray.tune.choice([8e-5]), #1e-4, 1e-3, 1e-2
-        "batch_size": ray.tune.choice([4]), #4
-        "margin": ray.tune.choice([0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.3]), #0.7, 0.9, 1.1, 1.3, 1.5
-
-    }
+            "l1": ray.tune.choice([16, 32, 64]), #16, 32
+            "l2": ray.tune.choice([32, 64, 128]), #32, 64
+            "l3": ray.tune.choice([32, 64, 128]), #32, 64, 128
+            "l4": ray.tune.choice([32, 64, 128]), #32, 64, 128
+            "l5": ray.tune.choice([64, 128, 256]), #64, 128, 256
+            "fc1": ray.tune.choice([512, 2048]), #512, 1024
+            "fc2": ray.tune.choice([128]), #64, 128
+            "lr": ray.tune.choice([8e-5]), #1e-4, 1e-3, 1e-2
+            "batch_size": ray.tune.choice([4]), #64
+            "margin": ray.tune.choice([0.9, 1.0]), 
+            }
 
 # At each trial, Ray Tune will now randomly sample a combination of parameters from these search spaces. 
 # It will then train a number of models in parallel and find the best performing one among these. 
 # We also use the ASHAScheduler which will terminate bad performing trials early.
 
 
-MODEL_NAME = "correct_data_test_run"
-data_setup.input_size = 400
+MODEL_NAME = "tuning_SiameseNetwork_he_init_batchnorm_ELU"
+#data_setup.input_size = 400
 
 
-"---------------Step 2: Define model and load data"
+# "---------------Step 2: Define model and load data"
 
-os.environ["CUDA_VISIBLE_DEVICES"]="2" # Choose cuda device
+os.environ["CUDA_VISIBLE_DEVICES"]="3" # Choose cuda device
 os.environ["RAY_DEDUP_LOGS"] = "0"
 
-def load_data(train_size=TRAIN_SIZE, batch_size=4,
-              dataloader_dir=DATALOADER_DIR):
-    # Check if saved dataloaders exist
-    train_dataloader_path = os.path.join(dataloader_dir, f"tsize{train_size}_bsize{batch_size}_train_{data_setup.input_size}_{data_setup.distance_function}.pth")
-    validation_dataloader_path = os.path.join(dataloader_dir, f"tsize{train_size}_bsize{batch_size}_validation_{data_setup.input_size}_{data_setup.distance_function}.pth")
- 
-    if os.path.exists(train_dataloader_path) and os.path.exists(validation_dataloader_path):
-        
-        # If saved dataloaders exist, load them
-        #print("\nLoading dataloaders...")
-        train_dataloader = torch.load(train_dataloader_path)
-        validation_dataloader = torch.load(validation_dataloader_path)
+# def load_data(train_size=TRAIN_SIZE, batch_size=4,
+#               dataset_dir=DATASET_DIR):
+#     # Check if saved dataloaders exist
+#     train_dataset_path = os.path.join(dataset_dir, f"tsize{train_size}_train_{data_setup.input_size}_{data_setup.distance_function}_md_{data_setup.md_names}_datasets.pth")
+#     validation_dataset_path = os.path.join(dataset_dir, f"tsize{train_size}_validation_{data_setup.input_size}_{data_setup.distance_function}_md_{data_setup.md_names}_datasets.pth")
+    
+#     if os.path.exists(train_dataset_path) and os.path.exists(validation_dataset_path): 
+#         # Load datasets and create dataloaders
+#         print("Loading dataset...")
+#         train_data = torch.load(train_dataset_path)
+#         validation_data = torch.load(validation_dataset_path)
+#     else:
+#         raise FileNotFoundError("Dataloaders not found")
 
-        #print(f"\n[INFO] Loaded saved dataloaders with {len(train_dataloader)} training batches and {len(validation_dataloader)} validation batches with batch_size={batch_size}")
-        #print(f"This gives a total of {len(train_dataloader.dataset)} training images and {len(validation_dataloader.dataset)} validation images")
-    else:
-        raise FileNotFoundError("Dataloaders not found")
+    
 
+#     return train_dataloader, validation_dataloader 
 
-    return train_dataloader, validation_dataloader 
+transform = transforms.Compose([
+        transforms.ToTensor(),  # Convert images to PyTorch tensors
+        transforms.CenterCrop(400), # Crop image to 400x400 pixels 
+        #transforms.RandomRotation(45) # Randomly rotates between min/max of specified value
+        # NOTE: Remember to change model_builder.input_size accordingly, if changing size of image by cropping
 
+        # transforms.RandomErasing(),
+        # Add transform here
+    ])
 
 "--------------Step 3: define training function-----------"
+# train_dataloader, val_dataloader, _ = data_setup.create_dataloaders(
+#                                                                     data_setup.data_folder,
+#                                                                     data_setup.md_names,
+#                                                                     data_setup.normalizer,
+#                                                                     data_setup.dataloader_dir,
+#                                                                     data_type="pkl",
+#                                                                     train_size=data_setup.TRAIN_SIZE,
+#                                                                     transform=transform, 
+#                                                                     batch_size=data_setup.BATCH_SIZE, 
+#                                                                     num_workers=data_setup.NUM_WORKERS,
+#                                                                     random_seed=data_setup.RANDOM_SEED,
+#                                                                     distance_function=data_setup.distance_function
+#                                                                     )
+# Set model - NOTE: remember to change model name at the top as well, if changing model
+#print(config["l1"].sample())
 
-def train_func(config, data_dir=DATALOADER_DIR):
+
+
+def train_func(config):
+    global transform
     #ray.tune.utils.wait_for_gpu()
+    model = model_builder.SiameseNetwork_he_init_batchnorm_ELU(config["l1"], config["l2"],
+                    config["l3"], config["l4"],
+                    config["l5"], config["fc1"], 
+                    config["fc2"])
     
+   
     
-    # Set model - NOTE: remember to change model name at the top as well, if changing model
-    model = model_builder.SiameseNetwork_he_init_batchnorm(config["l1"], config["l2"],
-                                         config["l3"], config["l4"],
-                                         config["l5"], config["fc1"], 
-                                         config["fc2"]
-                                         )
-    
-    os.environ["CUDA_VISIBLE_DEVICES"]="2"  # Choose which device to use (astro01 has 4 gpu's)
+    os.environ["CUDA_VISIBLE_DEVICES"]="3"  # Choose which device to use (astro01 has 4 gpu's)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model.to(device)
@@ -110,14 +131,26 @@ def train_func(config, data_dir=DATALOADER_DIR):
             optimizer.load_state_dict(checkpoint_state["optimizer_state_dict"])
     else:
         start_epoch = 0
+    
+    train_dataloader, val_dataloader, _  = data_setup.create_dataloaders(
+                                                                    data_setup.data_folder,
+                                                                    data_setup.md_names,
+                                                                    data_setup.normalizer,
+                                                                    data_setup.dataloader_dir,
+                                                                    data_type="pkl",
+                                                                    train_size=data_setup.TRAIN_SIZE,
+                                                                    transform=transform, 
+                                                                    batch_size=data_setup.BATCH_SIZE, 
+                                                                    num_workers=data_setup.NUM_WORKERS,
+                                                                    random_seed=data_setup.RANDOM_SEED,
+                                                                    distance_function=data_setup.distance_function
+                                                                    )
 
-    train_dataloader, val_dataloader = load_data()
 
     scaler = torch.cuda.amp.GradScaler() 
 
     for epoch in range(start_epoch, 5):  # loop over the dataset multiple times
         model.train()
-        #training_loss_output = []
 
         for batch in train_dataloader:
             img1, img2 = batch[0], batch[1] # NOTE: Model takes as input image sets when working with batches
@@ -137,14 +170,7 @@ def train_func(config, data_dir=DATALOADER_DIR):
             scaler.scale(torch.mean(training_loss)).backward(retain_graph=True)
             scaler.step(optimizer)
             scaler.update()
-            
-            #training_loss.backward()
-            #optimizer.step()
-
-        #training_loss = np.mean(training_loss_output)
-
         
-
         model.eval()  # Set the model to evaluation mode
         validation_loss_output = []
         truths = []
@@ -157,7 +183,6 @@ def train_func(config, data_dir=DATALOADER_DIR):
             truths.append(val_truth.detach().cpu().numpy())
 
             optimizer.zero_grad()
-            #torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # WHAT IT DO??
 
             with torch.autocast(device_type="cuda", dtype=torch.float16):
                 val_output1, val_output2, val_prediction = model(val_img1, val_img2) 
@@ -177,16 +202,7 @@ def train_func(config, data_dir=DATALOADER_DIR):
             scaler.update()
         validation_loss = np.mean(validation_loss_output)
 
-        #val_mae = metrics.mean_absolute_error(truths, predictions)
-        
-        #truths = [np.reshape(arr, (1,)) for arr in truths]
-        #truths = np.array(truths).flatten()
-        #truths = torch.cat(truths)
-        #truths = truths.numpy()
-        #predictions = np.array(predictions).flatten()
-        #predictions = torch.cat(predictions, dim=0).numpy()
-        # print("Truths", np.array(truths).shape)
-        # print("Predictions", np.array(predictions).shape)
+
         val_mse = metrics.mean_squared_error(np.concatenate(truths), np.concatenate(predictions))
         # Report losses
         ray.train.report({"val_loss": validation_loss, "val_mse": val_mse})
@@ -203,7 +219,8 @@ def train_func(config, data_dir=DATALOADER_DIR):
 
 "---------------------Step 4: Tune!------------------------"
 checkpoint_dir = "/lustre/astro/antonmol/learning_stuff/siamese_networks/checkpoints"
-def main(data_dir, num_samples=10, max_num_epochs=10, cpus=4, gpus_per_trial=1):
+def main(config, #dataloader_dir, 
+         num_samples=10, max_num_epochs=10, cpus=4, gpus_per_trial=1):
     
     
     scheduler = ASHAScheduler(
@@ -213,8 +230,9 @@ def main(data_dir, num_samples=10, max_num_epochs=10, cpus=4, gpus_per_trial=1):
         grace_period=1,
         reduction_factor=2,
     )
+    
     result = ray.tune.run(
-        partial(train_func, data_dir=data_dir),
+        partial(train_func),#, dataloader_dir=dataloader_dir),
         resources_per_trial={"cpu": cpus, "gpu": gpus_per_trial},
         config=config,
         num_samples=num_samples,
@@ -225,9 +243,6 @@ def main(data_dir, num_samples=10, max_num_epochs=10, cpus=4, gpus_per_trial=1):
     top_trials = result.trials
     top_trials.sort(key=lambda trial: trial.last_result.get("val_mse", float("inf")))
 
-    # if len(top_trials) >= 10:
-    #     n_saves = 10
-    # else:
     n_saves = len(top_trials)
 
 
@@ -256,7 +271,7 @@ def main(data_dir, num_samples=10, max_num_epochs=10, cpus=4, gpus_per_trial=1):
     df.to_csv(csv_file, sep="\t", index=False)
 
     
-    return result
+    return top_trials #result
 
 "------------Step 5: Run tuner ------------"
 
@@ -278,10 +293,13 @@ if __name__ == "__main__":
     gpus_per_trial = 0.25
     cpus = 40 / (1/gpus_per_trial)
     
-    result = main(data_dir = DATALOADER_DIR,
+    result = main(config=config,
+                  #dataloader_dir = DATALOADER_DIR,
                   num_samples=num_samples, 
                   max_num_epochs=max_num_epochs, 
                   cpus=cpus, 
                   gpus_per_trial=gpus_per_trial)
+    
+    
 
     
