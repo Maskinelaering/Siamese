@@ -119,21 +119,8 @@ def plot_results(output_dir,
     
     print("Rank:", rank)
     print("ranked predictions", ranked_predictions)
-    
-    # bins = int(0.5*len(best_pred_index))
-    
-    # if bins < 1: 
-    #     print("Not enough datapoints. Try lowering the threshold.")
-    #     print(f"Current threshold: {threshold}")
-    #     sys.exit(0)
-    # if bins >= 50:
-    #     bins = 50
-    #     print("bins maxed at 50")
-    # else:  
-    #     print("bins:", bins)
 
     bins = 30
-    
     
     all_titles_old = ["accretion rate primary\n[Ms/yr]", "accretion rate secondary\n[Ms/s]", "mass in 100\n[g]",
                 "mass\n[1/3000Ms]", "disk size\n[AU]", "separation\n[AU]", "t after formation\n[kyr]"]
@@ -151,7 +138,6 @@ def plot_results(output_dir,
         "t": all_titles[6],
     }
 
-    #log_titles = ["sep", "ds"] # set which metadata to plot logarithmic
     log_titles = []
 
     save_dir = os.path.join(output_dir, model_name, "matching")
@@ -221,7 +207,6 @@ def plot_results(output_dir,
         plt.title(title_mapping.get(md_names[i], "Not defined"))
     plt.suptitle(f"Best {len(param)} matches above threshold:{threshold}")
     plt.tight_layout()
-
 
 
     # Plot comparisons
@@ -310,11 +295,8 @@ def run(output_dir,
                 if batch_id > len(test_dataloader)-2:
                     break
 
-                #img1_batch = batch[0]    
                 img2_batch = batch[1].to(device).float()
                 
-                #md1_batch = batch[3]
-
                 MD2_tensor = batch[4][:,0,:].to(device).float()
                 truth = F.cosine_similarity(target_md, MD2_tensor)
                 out1, out2, prediction = model(target_image, img2_batch)
@@ -327,10 +309,8 @@ def run(output_dir,
                                 "metadata1_raw": target_md_raw, "metadata2_raw": batch[6].detach().cpu().numpy(),
                                 }
                     for key, value in test_params.items():
-                        # Check if the value is a tensor and if it's empty
                         if isinstance(value, torch.Tensor) and value.numel() == 0:
                             print(f"The tensor {key} is empty.")
-                        # Check if the value is empty (e.g., None, empty list, empty string, etc.)
                         elif value is None or (isinstance(value, str) and not value) or (isinstance(value, list) and not value):
                             print(f"The variable {key} is empty.")
 
@@ -354,8 +334,6 @@ def run(output_dir,
                         target_sink, 
                         target_snapshot, 
                         rank)
-
-
 
 
 if __name__ == "__main__":
