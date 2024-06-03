@@ -75,10 +75,8 @@ class ContrastiveLoss(nn.Module):
     def forward(self, output1, output2, prediction, truth):
         
         if data_setup.distance_function == "cosine":
-            # prediction = cosine_similarity(output1, output2) from model_builder.py
             distance = 0.5 * (1 - prediction) # pred=1 -> dist=0, pred=-1 -> dist=1
 
-            # target = cosine_similarity(metadata) from data_setup.py
             target = 0.5 * (truth + 1) # truth=1 -> target=1, truth=-1 -> target=0
             
             first_part = 0.5 * (target) * torch.pow(distance, 2)
@@ -86,33 +84,12 @@ class ContrastiveLoss(nn.Module):
 
             loss_contrastive = first_part + second_part
 
-
-
-            # loss_contrastive = (0.5 * (target) * torch.pow(distance, 2) +
-            #                        0.5 * (1 - target) * torch.pow(torch.clamp(self.margin - distance, min=0.0), 2))
-            
-
         if data_setup.distance_function == "euclid":
-            #distance = metrics.euclidean_distances(output1, output2)
-            #distance = (output1 - output2).pow(2).sum(1).sqrt()
             distance = prediction
             loss_contrastive = torch.mean((1 - target) * torch.pow(distance, 2) +
                                      (target) * torch.pow(torch.clamp(self.margin - distance, min=0.0), 2))
         
-        
-        
-        # loss_contrastive = torch.mean((1 - target) * torch.pow(distance, 2) +
-        #                               (target) * torch.pow(torch.clamp(self.margin - distance, min=0.0), 2))
         return loss_contrastive, first_part, second_part
-
-
-def triplet_loss():
-    """
-    Create a triplet loss function....
-    """
-    return
-
-    
 
 
 class EarlyStopping:
@@ -260,10 +237,6 @@ def training(model: nn.Module,
             train_mses.append(train_mse)
         except Exception as e:
             print(f"There was an error in MSE calculation: {e}")
-            # print("Train truths:", np.concatenate(train_truths))
-            # print("NaN at index:", np.where(np.isnan(train_truths)))
-            # print("Train predictions", np.concatenate(train_predictions))
-            # print("NaN at index:", np.where(np.isnan(train_predictions)))
             
             train_mses.append(1.0)
 
@@ -282,21 +255,8 @@ def training(model: nn.Module,
                             )
             
             writer.add_graph(model=model, 
-                            # Pass in an example input
-                            #input_to_model=torch.randn(4, 1, 400, 400).to(device))
                              input_to_model = (img1, img2)
                             )
-
-            # for name, param in model.named_parameters():
-            #     writer.add_histogram(name, param.clone().cpu().data.numpy(), epoch)
-            
-            # # Add input images
-            # writer.add_images('Input Images', img1, global_step=epoch)
-            # writer.add_images('Input Images', img2, global_step=epoch)
-            # # Add output images
-            # writer.add_images('Output Images', output_images, global_step=epoch)
-
-            # Close the writer
             writer.close()
 
         #torch.cuda.empty_cache() # empty before evaluation?
@@ -320,7 +280,6 @@ def training(model: nn.Module,
                 val_output1, val_output2, val_prediction = model(val_img1, val_img2) 
                 assert val_output1.dtype is torch.float16
                 assert val_output2.dtype is torch.float16
-                #assert val_similarity.dtype is torch.float16
                 validation_loss, val_first, val_second = loss_fn(val_output1, val_output2, val_prediction, val_sim_score) 
                 assert validation_loss.dtype is torch.float32
                 
@@ -336,18 +295,10 @@ def training(model: nn.Module,
                 val_truths.append(val_sim_score.detach().cpu().numpy())
                 val_predictions.append(val_prediction.detach().cpu().numpy())
         
-            # scaler.scale(torch.mean(validation_loss)).backward(retain_graph=True)
-            # scaler.step(optimizer)
-            # scaler.update()
 
         validation_loss = np.mean(validation_loss_output)
         first_val_loss = np.mean(val_first_output)
         second_val_loss = np.mean(val_second_output)
-
-        # print("VALTRUTHS:", val_truths)
-        # print("VALTRUTHSCONCAT:", np.concatenate(val_truths))
-        # print("VALPREDS:", val_truths)
-        # print("VALPREDSCONCAT:", np.concatenate(val_truths))
         
         try:
             val_mse = metrics.mean_squared_error(np.concatenate(val_truths), np.concatenate(val_predictions))
@@ -369,18 +320,15 @@ def training(model: nn.Module,
             if validation_loss < best_validation_loss:
                 best_validation_loss = validation_loss
                 utils.save_model(model, output_dir, model_name, structure_df=None)
-                #print("Saved an improved model.")
 
         epochs.append(epoch+1)
 
         print(f'Epoch:{epoch+1}, Training Loss: {training_loss:.6f}, Validation Loss: {validation_loss:.6f}')
         
-
         epoch_gradients = {}
         for name, param in model.named_parameters():
             if param.grad is not None:
                 epoch_gradients[name] = param.grad.norm().item()
-            
         try:
             model_parameter_df = pd.concat([model_parameter_df, pd.DataFrame(epoch_gradients, index=[0])], ignore_index=True)
         except:
@@ -404,7 +352,6 @@ def training(model: nn.Module,
                             }
             utils.save_batch_data_hdf5(hf, train_val_params, batch_id)
         if writer:
-            # Add validation loss to SummaryWriter
             writer.add_scalar(tag="Validation Loss",
                             scalar_value=np.mean(validation_loss_output),
                             global_step=epoch)
@@ -414,18 +361,13 @@ def training(model: nn.Module,
         if writer:
             writer.close()
 
-
         if early_stopping.early_stop:
             print("Early stopping triggered. Training stopped.")
             break 
         
-        
-        
         # Calculate memory usage after each epoch
         current_memory = torch.cuda.memory_allocated(0)
-
         print(f"Total memory usage {current_memory / (1024**2):.2f} MB")
-
 
         torch.cuda.empty_cache()
         #gc.collect()
@@ -446,7 +388,7 @@ def pre_tuning(config,
     checkpoint_dir = "/lustre/astro/antonmol/learning_stuff/siamese_networks/checkpoints"
 
     scheduler = ASHAScheduler(
-        metric="val_mse", # CONSIDER USING ACCURACY (?)
+        metric="val_mse", 
         mode="min",
         max_t=max_num_epochs,
         grace_period=1,
@@ -460,7 +402,6 @@ def pre_tuning(config,
         num_samples=num_samples,
         scheduler=scheduler,
         local_dir=checkpoint_dir,
-        #verbose=0,
     )
     print("RUNNING2")
 
@@ -485,7 +426,7 @@ def pre_tuning(config,
     if not os.path.exists(file_path):
         os.makedirs(file_path)
     
-    "Saving as csv file with pandas"
+    # Saving as csv file with pandas
     params = [trial.config for trial in top_trials[:n_saves]]
     df = pd.DataFrame(params)
     df['Validation Loss'] = [trial.last_result['val_loss'] for trial in top_trials[:n_saves]]
@@ -503,7 +444,8 @@ def create_writer(experiment_name: str,
                   model_name: str,
                   timestamp: str, 
                   extra: str=None) -> torch.utils.tensorboard.writer.SummaryWriter():
-    """Creates a torch.utils.tensorboard.writer.SummaryWriter() instance saving to a specific log_dir.
+    """
+    Creates a torch.utils.tensorboard.writer.SummaryWriter() instance saving to a specific log_dir.
 
     Args:
         experiment_name (str): Name of experiment.
@@ -544,8 +486,6 @@ def create_writer(experiment_name: str,
 
 ##### --------------- Visualisations -------------------
 
-
-
 def visualize_embeddings(h5_filename, output_dir, model_name):
     out1, out2 = utils.get_batch_data_hdf5(h5_filename, ["out1", "out2"])
 
@@ -565,12 +505,7 @@ def visualize_embeddings(h5_filename, output_dir, model_name):
     print("Embeddings saved!")
 
 
-
-
-
-    
 # ------------------- TEST --------------------
-
 
 def testing(model: nn.Module,
             test_dataloader: DataLoader,
@@ -606,7 +541,6 @@ def testing(model: nn.Module,
                     metadata2 = batch[4]
                     metadata1_raw = batch[5]
                     metadata2_raw = batch[6]
-
 
                     test_params = {
                             "out1": out1_batch, "out2": out2_batch,
