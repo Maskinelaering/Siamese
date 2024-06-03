@@ -22,7 +22,7 @@ This script is for tuning hyperparameters of a given model
 """
 "---------------Step 1: Configure the search space and data -----------------"
 
-DATASET_DIR = "/lustre/astro/antonmol/learning_stuff/siamese_networks/datasets"
+DATASET_DIR = "/lustre/astro/antonmol/learning_stuff/siamese_networks/datasets_krisha"
 TRAIN_SIZE = 0.2
 
 #data_setup.distance_function = "cosine"  # cosine, euclid
@@ -38,7 +38,7 @@ config = {
             "fc2": ray.tune.choice([128]), #64, 128
             "lr": ray.tune.choice([8e-5]), #1e-4, 1e-3, 1e-2
             "batch_size": ray.tune.choice([4]), #64
-            "margin": ray.tune.choice([0.9, 1.0]), 
+            "margin": ray.tune.choice([0.8, 1.0]), 
             }
 
 # At each trial, Ray Tune will now randomly sample a combination of parameters from these search spaces. 
@@ -46,7 +46,7 @@ config = {
 # We also use the ASHAScheduler which will terminate bad performing trials early.
 
 
-MODEL_NAME = "tuning_SiameseNetwork_he_init_batchnorm_ELU"
+MODEL_NAME = "tuning_SiameseNetwork"
 #data_setup.input_size = 400
 
 
@@ -105,7 +105,7 @@ transform = transforms.Compose([
 def train_func(config):
     global transform
     #ray.tune.utils.wait_for_gpu()
-    model = model_builder.SiameseNetwork_he_init_batchnorm_ELU(config["l1"], config["l2"],
+    model = model_builder.SiameseNetwork(config["l1"], config["l2"],
                     config["l3"], config["l4"],
                     config["l5"], config["fc1"], 
                     config["fc2"])

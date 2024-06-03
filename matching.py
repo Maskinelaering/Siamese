@@ -13,26 +13,42 @@ import random
 import pickle
 import h5py
 import sys
+import gc
 
 
-def get_target(target_dir, md_names, target_normalizer, projection=0, image_transform=None, batch_size=4):
+def get_target(target_dir, md_names, target_normalizer, projection="0", image_transform=None, batch_size=4, data_type="pkl"):
 
-    target_file = [os.path.join(target_dir, f) for f in os.listdir(target_dir) if f"projection_{projection}" in f]
-    target_md_file = [os.path.join(target_dir, f) for f in os.listdir(target_dir) if f"characteristics" in f]
-    with open(target_file[0], 'rb') as f:
-        target_image = pickle.load(f)
-        target_image = np.array(target_image)
-        target_image = (target_image - np.min(target_image)) / (np.max(target_image) - np.min(target_image))
-        target_image = image_transform(target_image)
-        target_image = target_image.unsqueeze(0)
-        target_image = target_image.repeat(batch_size, 1, 1, 1) # Make sure the shape follows batch size of other data, typically 4
+    if data_type == "pkl":
+        target_file = [os.path.join(target_dir, f) for f in os.listdir(target_dir) if f"projection_{projection}" in f]
+        target_md_file = [os.path.join(target_dir, f) for f in os.listdir(target_dir) if f"characteristics" in f]
+        with open(target_file[0], 'rb') as f:
+            target_image = pickle.load(f)
+            target_image = np.array(target_image)
+            target_image = (target_image - np.min(target_image)) / (np.max(target_image) - np.min(target_image))
+            target_image = image_transform(target_image)
+            target_image = target_image.unsqueeze(0)
+            target_image = target_image.repeat(batch_size, 1, 1, 1) # Make sure the shape follows batch size of other data, typically 4
 
-    with open(target_md_file[0], 'rb') as f:
-        target_md_file = pickle.load(f)
-        target_md, target_md_raw = data_setup.get_metadata(target_md_file, md_names, target_normalizer)
-        target_md = torch.tensor(np.array(target_md)[0]).repeat(batch_size, 1)
-        target_md_raw = torch.tensor(np.array(target_md_raw)[0]).repeat(batch_size, 1)
+        with open(target_md_file[0], 'rb') as f:
+            target_md_file = pickle.load(f)
+            target_md, target_md_raw = data_setup.get_metadata(target_md_file, md_names, target_normalizer, data_type=data_type)
+            target_md = torch.tensor(np.array(target_md)[0]).repeat(batch_size, 1)
+            target_md_raw = torch.tensor(np.array(target_md_raw)[0]).repeat(batch_size, 1)
     
+    elif data_type == "krisha":
+        target_file = target_dir
+
+        with h5py.File(target_file, "r") as hf:
+            target_image = hf[f'intensity_projection_{projection}'][:]
+            target_image = np.array(target_image)
+            target_image = (target_image - np.min(target_image)) / (np.max(target_image) - np.min(target_image))
+            target_image = image_transform(target_image)
+            target_image = target_image.unsqueeze(0)
+            target_image = target_image.repeat(batch_size, 1, 1, 1)
+
+            target_md, target_md_raw = data_setup.get_metadata(target_file, md_names, target_normalizer, data_type=data_type)
+            target_md = torch.tensor(np.array(target_md)[0]).repeat(batch_size, 1)
+            target_md_raw = torch.tensor(np.array(target_md_raw)[0]).repeat(batch_size, 1)
     return target_image, target_md, target_md_raw
 
 def get_model(output_dir,
@@ -43,13 +59,13 @@ def get_model(output_dir,
     ### Load model
     print("Loading model...")
     if not device:
-        os.environ["CUDA_VISIBLE_DEVICES"]="2"  # Choose which device to use (astro01 has 4 gpu's)
+        os.environ["CUDA_VISIBLE_DEVICES"]=data_setup.device_nr  # Choose which device to use (astro01 has 4 gpu's)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # Use cuda (gpu) if available
 
     checkpoint = torch.load(f"{output_dir}/{model_name}/{model_name}.pth")
 
     if not model:
-        model_builder.input_size = 400
+        model_builder.input_size = 512
         model = model_builder.SiameseNetwork(l1=32, l2=32, l3=128, l4=64, l5=128, 
                                         fc_units1=512, 
                                         fc_units2=128)
@@ -78,7 +94,7 @@ def plot_results(output_dir,
     target_imgs, img2s = utils.get_batch_data_hdf5(h5_match, ["img1", "img2"])
     
     if rank == "best":
-        if threshold:
+        if threshold is not None:
             ranked_pred_index = np.where(predictions >= threshold)[0]
             print(f"Matching {len(ranked_pred_index)} images above threshold {threshold}")
         else:
@@ -89,8 +105,11 @@ def plot_results(output_dir,
         try:
             ranked_pred_index = np.random.choice(np.arange(len(predictions)), size=nsamp, replace=False)
         except:
-            print("Not enough datapoints for histogram of random metadata. Continuing without saving plot.")
-            return
+            try:
+                ranked_pred_index = np.random.choice(np.arange(len(predictions)), size=len(predictions), replace=False)
+            except:
+                print("Not enough datapoints for histogram of random metadata. Continuing without saving plot.")
+                return
 
     ranked_predictions = predictions[ranked_pred_index]
     ranked_truths = truths[ranked_pred_index]
@@ -181,6 +200,7 @@ def plot_results(output_dir,
     
     plt.tight_layout()
     plt.savefig(save_file)
+    plt.close()
     print(f"Saved image at {save_file}")
 
 
@@ -225,6 +245,7 @@ def plot_results(output_dir,
         plt.suptitle(f"Target: Sink {target_sink} snapshot {target_snapshot}\ncompared to best of random matches from sink 49")
     plt.tight_layout()
     plt.savefig(save_file_comp)
+    plt.close()
     print(f"Saved images at {save_file_comp}")
 
 
@@ -247,10 +268,15 @@ def run(output_dir,
         device,
         nsamp,
         threshold,
+        data_type="pkl"
         ):
-
+    
     for target_snapshot in target_snapshots:
-        target_dir = f"/lustre/astro/antonmol/atm_new_dataset_sink{target_sink}/dataset_{target_snapshot}"
+        if data_type == "pkl":
+            target_dir = f"/lustre/astro/antonmol/atm_new_dataset_sink{target_sink}/dataset_{target_snapshot}"
+        elif data_type == "krisha":
+            target_dir = f"/lustre/astro/krisha10/code/metadata_folder/sink{target_sink}/output_{target_snapshot}_isink_{target_sink}_data.hdf5"
+        
         print("Finding similarities for")
         print(f"target image: {target_dir}")
         print(f"and data from {test_dataloader_path}")
@@ -260,8 +286,16 @@ def run(output_dir,
                                                             target_normalizer, 
                                                             target_projection, 
                                                             transform, 
-                                                            batch_size)
-        
+                                                            batch_size, 
+                                                            data_type=data_type)
+        if not isinstance(target_image, torch.Tensor):
+            target_image = torch.tensor(target_image)
+        target_image = target_image.to(device).float()
+
+        if not isinstance(target_md, torch.Tensor):
+            target_md = torch.tensor(target_md)
+        target_md = target_md.to(device).float()
+
         model = get_model(output_dir, model_name, model, device)
 
         ### Compute similarities
@@ -271,41 +305,43 @@ def run(output_dir,
                                 f"target_sink{target_sink}_{target_snapshot}.h5")
         os.makedirs(os.path.dirname(h5_match), exist_ok=True)
 
-        with h5py.File(h5_match, "w") as hf:
+        with torch.no_grad(): # No need to store and calculate gradients! Significantly reduces memory usage
             for batch_id, batch in enumerate(test_dataloader):
                 if batch_id > len(test_dataloader)-2:
                     break
 
                 #img1_batch = batch[0]    
-                img2_batch = batch[1]
+                img2_batch = batch[1].to(device).float()
                 
                 #md1_batch = batch[3]
-                md2_batch = np.array(batch[4])
-                md2_batch_raw = np.array(batch[6])
 
-                MD1_tensor = target_md 
-                MD2_tensor = torch.tensor(md2_batch)[:,0,:]
+                MD2_tensor = batch[4][:,0,:].to(device).float()
+                truth = F.cosine_similarity(target_md, MD2_tensor)
+                out1, out2, prediction = model(target_image, img2_batch)
+                with h5py.File(h5_match, "w") as hf:
+                    test_params = {"img1": target_image, "img2": img2_batch,
+                                "out1": out1, "out2": out2,
+                                "truths": truth, 
+                                "predictions": prediction,
+                                "metadata1": target_md, "metadata2": batch[4].detach().cpu().numpy(),
+                                "metadata1_raw": target_md_raw, "metadata2_raw": batch[6].detach().cpu().numpy(),
+                                }
+                    for key, value in test_params.items():
+                        # Check if the value is a tensor and if it's empty
+                        if isinstance(value, torch.Tensor) and value.numel() == 0:
+                            print(f"The tensor {key} is empty.")
+                        # Check if the value is empty (e.g., None, empty list, empty string, etc.)
+                        elif value is None or (isinstance(value, str) and not value) or (isinstance(value, list) and not value):
+                            print(f"The variable {key} is empty.")
 
-                truth = F.cosine_similarity(MD1_tensor, MD2_tensor)
-                out1, out2, prediction = model(target_image.to(device).float(), img2_batch.to(device).float())
-            
-                test_params = {"img1": target_image, "img2": img2_batch,
-                            "out1": out1, "out2": out2,
-                            "truths": truth, 
-                            "predictions": prediction,
-                            "metadata1": target_md, "metadata2": md2_batch,
-                            "metadata1_raw": target_md_raw, "metadata2_raw": md2_batch_raw,
-                            }
-                for key, value in test_params.items():
-                    # Check if the value is a tensor and if it's empty
-                    if isinstance(value, torch.Tensor) and value.numel() == 0:
-                        print(f"The tensor {key} is empty.")
-                    # Check if the value is empty (e.g., None, empty list, empty string, etc.)
-                    elif value is None or (isinstance(value, str) and not value) or (isinstance(value, list) and not value):
-                        print(f"The variable {key} is empty.")
+                    utils.save_batch_data_hdf5(hf, test_params, batch_id)
+                    
+                del test_params, img2_batch
 
-                utils.save_batch_data_hdf5(hf, test_params, batch_id)
+                torch.cuda.empty_cache()
+                gc.collect()
                 
+
         print(f"Saved outputs at {h5_match}")
 
         for rank in ["best", "random"]:
@@ -364,7 +400,7 @@ if __name__ == "__main__":
     
     ])
     # Setup target device
-    os.environ["CUDA_VISIBLE_DEVICES"] = "2"  # Choose which device to use (astro01 has 4 gpu's)
+    os.environ["CUDA_VISIBLE_DEVICES"] = data_setup.device_nr  # Choose which device to use (astro01 has 4 gpu's)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # Use cuda (gpu) if available
 
 

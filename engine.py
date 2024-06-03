@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
+import gc
 
 from torch.utils.tensorboard import SummaryWriter
 import tqdm as tqdm
@@ -190,9 +191,6 @@ def training(model: nn.Module,
         train_truths = []
         train_predictions = []
 
-        metadata1 = []
-        metadata2 = []
-
         for i, batch in enumerate(train_dataloader):
             #print("bshape", batch)
             img1, img2 = batch[0], batch[1] # OBS: Model takes as input image sets when working with batches
@@ -212,10 +210,14 @@ def training(model: nn.Module,
                 # See more: https://pytorch.org/docs/stable/amp.html#autocasting
 
                 # Forward pass
-                output1, output2, prediction = model(img1, img2) 
+                output1, output2, prediction = model(img1, img2)
 
                 if np.isnan(prediction.detach().cpu().numpy()).any():
-                    print("predictions index with nan", i)
+                    print("There was a NaN value in the batch predictions at index", i)
+                    print(prediction)
+                    print("Setting NaN-value to zero")
+                    prediction = torch.nan_to_num(prediction, nan=0.1)
+                    print(prediction)
                 assert output1.dtype is torch.float16
                 assert output2.dtype is torch.float16
 
@@ -230,6 +232,9 @@ def training(model: nn.Module,
                 output2.detach()
                 train_first.detach()
                 train_second.detach()
+
+                #torch.cuda.empty_cache() # empty after each batch?
+                
 
             # Perform backpropagation
             scaler.scale(torch.mean(training_loss)).backward(retain_graph=True)
@@ -293,7 +298,10 @@ def training(model: nn.Module,
 
             # Close the writer
             writer.close()
-        
+
+        #torch.cuda.empty_cache() # empty before evaluation?
+        #gc.collect()
+
         model.eval()  # Set the model to evaluation mode
         validation_loss_output = []
         val_first_output = []
@@ -418,7 +426,10 @@ def training(model: nn.Module,
 
         print(f"Total memory usage {current_memory / (1024**2):.2f} MB")
 
+
         torch.cuda.empty_cache()
+        #gc.collect()
+
     print("[INFO] Training done")
     return model_parameter_df
 
@@ -533,147 +544,6 @@ def create_writer(experiment_name: str,
 
 ##### --------------- Visualisations -------------------
 
-def calculate_mse_from_hdf5(h5_filename):
-    "Used to calculate the mean squared error of the truths vs. predictions"
-    truths, predictions = utils.get_batch_data_hdf5(h5_filename, ["truths", "predictions"])
-    print("Truth/prediction datapoints:", len(truths))
-    if len(truths) >= 30:
-        print("First 30 truths:", truths[0:30])
-        print("First 30 predictions", predictions[0:30])
-
-    mse = metrics.mean_squared_error(truths, predictions)
-    return mse
-
-def calculate_accuracy_from_hdf5(h5_filename, error=0.1, low=0.9, high=1.0):
-    "Used to calculate the accuracy of the truths vs. predictions"
-    truths, predictions = utils.get_batch_data_hdf5(h5_filename, ["truths", "predictions"])
-    
-    truths = truths[np.where((predictions >= low) & (predictions <= high))]
-    predictions = predictions[np.where((predictions >= low) & (predictions <= high))]
-    
-    true_scores = []
-    for t, p in zip(truths, predictions):
-        if abs(t-p) < error:
-            score = 1
-        else:
-            score = 0
-        true_scores.append(score)
-    acc_mean = np.sum(true_scores) / len(true_scores)  
-    acc_sum = np.sum(true_scores)
-
-    return acc_mean, acc_sum
-
-
-def create_clustering_plot(h5_filename, output_dir, model_name, id=None):
-    """
-    Creates plot of truths versus predictions for 
-    1. The direct comparisons: 
-        The true and predicted values for similarity of each image pair is compared
-    2. The ranked comparisons:
-        The lowest true value is compared to the lowest predicted value, giving an overview
-        of how the model ranks pairs based on similarity compared to the actual given similarity labels.
-
-    """
-    truths, predictions = utils.get_batch_data_hdf5(h5_filename, ["truths", "predictions"])
-    
-    save_dir = os.path.join(output_dir, model_name, "images")
-    save_name = os.path.join(output_dir, model_name, "images")
-    output_dir_path = Path(save_name)
-    if not os.path.exists(output_dir_path):
-        output_dir_path.mkdir(parents=True, exist_ok=True)
-
-    save_path = os.path.join(save_dir, f"clustering.png")
-    #plt.figure(figsize=(12,10))
-    fig, axs = plt.subplots(2, 2, figsize=(12, 10), gridspec_kw={'height_ratios': [2, 1]})
-
-    # Direct comparison
-    axs[0, 0].plot(truths, predictions, '.', label="Test predictions vs. true values")
-    axs[0, 0].plot(np.linspace(np.min(truths), np.max(truths), 100), 
-                np.linspace(np.min(truths), np.max(truths), 100),
-                ls="--", color="k", label="Perfect score")
-    axs[0, 0].set_xlabel("Truths")
-    axs[0, 0].set_ylabel("Predictions")
-    axs[0, 0].legend()
-    axs[0, 0].set_title("Direct comparison")
-
-    axs[1, 0].plot(truths, predictions, '.', label="Test predictions vs. true values")
-    axs[1, 0].plot(np.linspace(np.min(truths), np.max(truths), 100), 
-                np.linspace(np.min(truths), np.max(truths), 100),
-                ls="--", color="k", label="Perfect score")
-    axs[1, 0].set_xlim(0.8, 1.0)
-    axs[1, 0].set_ylim(0.8, 1.0)
-    axs[1, 0].set_xlabel("Truths")
-    axs[1, 0].set_ylabel("Predictions")
-    # plt.subplot(2,2,1)
-    # plt.plot(truths, predictions, '.', label="Test predictions vs. true values")
-    # plt.plot(np.linspace(np.min(truths), np.max(truths), 100), 
-    #      np.linspace(np.min(truths), np.max(truths), 100),
-    #      ls="--", color="k", label="Perfect score")
-    # plt.xlabel("Truths")
-    # plt.ylabel("Predictions")
-    # plt.legend()
-    # plt.title("Direct comparison")
-
-    # plt.subplot(2,2,3)
-    # plt.plot(truths, predictions, '.', label="Test predictions vs. true values")
-    # plt.plot(np.linspace(np.min(truths), np.max(truths), 100), 
-    #      np.linspace(np.min(truths), np.max(truths), 100),
-    #      ls="--", color="k", label="Perfect score")
-    # plt.xlim(0.8, 1.0)
-    # plt.ylim(0.8, 1.0)
-    # plt.xlabel("Truths")
-    # plt.ylabel("Predictions")
-    # plt.legend()
-
-    # Ranked comparison
-    truths_sorted = truths[np.argsort(truths)]
-    predictions_sorted = predictions[np.argsort(predictions)]
-    axs[0, 1].plot(truths_sorted, predictions_sorted, '.', label="Test predictions vs. true values")
-    axs[0, 1].plot(np.linspace(np.min(truths), np.max(truths), 100), 
-                np.linspace(np.min(truths), np.max(truths), 100),
-                ls="--", color="k", label="Perfect score")
-    axs[0, 1].set_xlabel("Truths")
-    axs[0, 1].set_ylabel("Predictions")
-    axs[0, 1].set_title("Ranked comparison")
-
-    axs[1, 1].plot(truths_sorted, predictions_sorted, '.', label="Test predictions vs. true values")
-    axs[1, 1].plot(np.linspace(np.min(truths), np.max(truths), 100), 
-                np.linspace(np.min(truths), np.max(truths), 100),
-                ls="--", color="k", label="Perfect score")
-    axs[1, 1].set_xlim(0.8, 1.0)
-    axs[1, 1].set_ylim(0.8, 1.0)
-    axs[1, 1].set_xlabel("Truths")
-    axs[1, 1].set_ylabel("Predictions")
-    # plt.subplot(2,2,2)
-    # truths_sorted = truths[np.argsort(truths)]
-    # predictions_sorted = predictions[np.argsort(predictions)]
-
-    # plt.plot(truths_sorted, predictions_sorted, '.', label="Test predictions vs. true values")
-    # plt.plot(np.linspace(np.min(truths), np.max(truths), 100), 
-    #         np.linspace(np.min(truths), np.max(truths), 100),
-    #         ls="--", color="k", label="Perfect score")
-    # plt.xlabel("Truths")
-    # plt.ylabel("Predictions")
-    # plt.title("Ranked comparison")
-    # plt.suptitle(f"Model: {model_name}")
-
-    # plt.subplot(2,2,4)
-    # truths_sorted = truths[np.argsort(truths)]
-    # predictions_sorted = predictions[np.argsort(predictions)]
-
-    # plt.plot(truths_sorted, predictions_sorted, '.', label="Test predictions vs. true values")
-    # plt.plot(np.linspace(np.min(truths), np.max(truths), 100), 
-    #         np.linspace(np.min(truths), np.max(truths), 100),
-    #         ls="--", color="k", label="Perfect score")
-    # plt.xlim(0.8, 1.0)
-    # plt.ylim(0.8, 1.0)
-    # plt.xlabel("Truths")
-    # plt.ylabel("Predictions")
-    # plt.suptitle(f"Model: {model_name}")
-    
-    plt.tight_layout()
-    plt.savefig(save_path)
-
 
 
 def visualize_embeddings(h5_filename, output_dir, model_name):
@@ -691,6 +561,7 @@ def visualize_embeddings(h5_filename, output_dir, model_name):
     #plt.colorbar()
     plt.title("t-SNE Visualization of Embeddings")
     plt.savefig(save_path)
+    plt.close()
     print("Embeddings saved!")
 
 
@@ -724,29 +595,34 @@ def testing(model: nn.Module,
 
     with h5py.File(h5_filename, "w") as hf:
         with h5py.File(h5_images, "w") as hf2:
-            for batch_id, batch in enumerate(test_dataloader):
-                img1_batch, img2_batch = batch[0], batch[1]
-                out1_batch, out2_batch, predictions_batch = model(img1_batch.to(device).float(), 
-                                                            img2_batch.to(device).float())
-                truths_batch = batch[2]
-                
-                metadata1 = batch[3]
-                metadata2 = batch[4]
-                metadata1_raw = batch[5]
-                metadata2_raw = batch[6]
+            with torch.no_grad():
+                for batch_id, batch in enumerate(test_dataloader):
+                    img1_batch, img2_batch = batch[0], batch[1]
+                    out1_batch, out2_batch, predictions_batch = model(img1_batch.to(device).float(), 
+                                                                img2_batch.to(device).float())
+                    truths_batch = batch[2]
+                    
+                    metadata1 = batch[3]
+                    metadata2 = batch[4]
+                    metadata1_raw = batch[5]
+                    metadata2_raw = batch[6]
 
 
-                test_params = {
-                        "out1": out1_batch, "out2": out2_batch,
-                        "truths": truths_batch, "predictions": predictions_batch,
-                        "metadata1": metadata1, "metadata2": metadata2,
-                        "metadata1_raw": metadata1_raw, "metadata2_raw": metadata2_raw,
-                        }
-                input_images = {
-                        "img1": img1_batch, "img2": img2_batch,
-                        }
-                utils.save_batch_data_hdf5(hf, test_params, batch_id)
-                utils.save_batch_data_hdf5(hf2, input_images, batch_id)
+                    test_params = {
+                            "out1": out1_batch, "out2": out2_batch,
+                            "truths": truths_batch, "predictions": predictions_batch,
+                            "metadata1": metadata1, "metadata2": metadata2,
+                            "metadata1_raw": metadata1_raw, "metadata2_raw": metadata2_raw,
+                            }
+                    input_images = {
+                            "img1": img1_batch, "img2": img2_batch,
+                            }
+                    utils.save_batch_data_hdf5(hf, test_params, batch_id)
+                    utils.save_batch_data_hdf5(hf2, input_images, batch_id)
+
+                    del test_params, input_images
+                    #torch.cuda.empty_cache()
+                    #gc.collect()
         
     print("[INFO] Test done.")
     # Calculate memory usage after each epoch
@@ -755,13 +631,13 @@ def testing(model: nn.Module,
     print(f"Total memory usage {current_memory / (1024**2):.2f} MB")
 
     torch.cuda.empty_cache()
-
+    gc.collect()
     # Run functions
-    mse = calculate_mse_from_hdf5(h5_filename, )
+    mse = utils.calculate_mse_from_hdf5(h5_filename, )
     print(f"Mean Squared Error: {mse}")
     
 
-    create_clustering_plot(h5_filename, output_dir, model_name, batch_id)
+    utils.create_clustering_plot(h5_filename, output_dir, model_name, batch_id)
 
     acc_means, acc_sums = utils.plot_accuracy(h5_filename, output_dir, model_name, lower_limit=0.9, upper_limit=1.0, bins=10, plot=True)
     #visualize_embeddings(h5_filename, output_dir, model_name)

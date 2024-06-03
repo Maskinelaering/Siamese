@@ -11,13 +11,14 @@ from torchsummary import summary
 from torchvision import transforms, models
 from torch.utils.data import Dataset, DataLoader, Subset
 from torch.utils.tensorboard import SummaryWriter
-import data_setup, model_builder, engine, utils, matching, tuning
+import data_setup, model_builder, engine, utils, matching, tuning, tuning2
 import matplotlib.pyplot as plt
 import argparse
 import ray
 from sklearn import metrics
 from ray.tune.schedulers import ASHAScheduler
 from functools import partial
+import json
 
 
 """ 
@@ -91,6 +92,7 @@ parser.add_argument("--output_dir", type=str, default="/lustre/astro/antonmol/le
 parser.add_argument("--model_name", type=str, default="just_testing", help="Model name")
 parser.add_argument("--data_folder", type=str, default="/lustre/astro/antonmol/atm_new_dataset_sink49", help="Path to datafolder")
 parser.add_argument("--dataloader_dir", type=str, default="/lustre/astro/antonmol/learning_stuff/siamese_networks/dataloaders", help="Path to folder for storing dataloaders")
+parser.add_argument("--data_type", type=str, default="krisha", help="Type of data. pkl=old Vito data, krisha=our data")
 
 parser.add_argument("--random_seed", type=int, default=None, help="Random seed for data(?)")
 
@@ -118,8 +120,10 @@ data_setup.FC_UNITS2 = args.fc2
 
 
 plot_matches = True
-device_nr = "1"     
-data_type = 'pkl'
+matching_test = True
+pre_train_interpretation = False
+
+data_type = args.data_type
 
 
 ########## Directory params ##########
@@ -136,14 +140,19 @@ if not os.path.exists(data_setup.output_dir):
 
 ########## Metadata params ##########
 
-#md_names = data_setup.md_names
+
 
 data_setup.distance_function = "cosine"  # cosine, euclid
 data_setup.norm_type = "z_score" # minmax, z_score
 #DISTANCE_FUNCTION = data_setup.distance_function  # cosine, euclid
 
-normalizer_file = "metadata_stats_sink49.csv"
-normalizer = pd.read_csv(f"/lustre/astro/antonmol/learning_stuff/siamese_networks/{normalizer_file}", index_col=0)
+if data_type == "pkl":
+    data_setup.normalizer_file = "metadata_stats_sink49.csv"
+elif data_type == "krisha":
+    data_setup.md_names = ["m_env", "ar", "temp", "m", "ds", "lum", "t"]
+    sink = 24
+    data_setup.normalizer_file = f"metadata_stats_sink{sink}_krisha.csv"
+normalizer = pd.read_csv(f"/lustre/astro/antonmol/learning_stuff/siamese_networks/{data_setup.normalizer_file}", index_col=0)
 data_setup.normalizer = normalizer
 
 ########## Tuning params ##########
@@ -158,17 +167,17 @@ cpus = 40 / (1/gpus_per_trial)
 
 
 
-data_setup.input_size = 400 # Change input image size if using cropping
+data_setup.input_size = 512 # Change input image size if using cropping
 print("Input image size:", data_setup.input_size)
 
 # Setup target device
-os.environ["CUDA_VISIBLE_DEVICES"] = device_nr  # Choose which device to use (astro01 has 4 gpu's)
+os.environ["CUDA_VISIBLE_DEVICES"] = data_setup.device_nr  # Choose which device to use (astro01 has 4 gpu's)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # Use cuda (gpu) if available
 print(f"\nUsing {device} as device")
 print("Current device:", os.environ["CUDA_VISIBLE_DEVICES"])
 print("Device name", torch.cuda.get_device_name(torch.cuda.current_device()))
 
-
+# Initialize model for training (will be overwritten by experiments.py)
 model = model_builder.SiameseNetwork(l1=data_setup.L1, l2=data_setup.L2, l3=data_setup.L3, l4=data_setup.L4, l5=data_setup.L5, 
                                                 fc_units1=data_setup.FC_UNITS1, 
                                                 fc_units2=data_setup.FC_UNITS2)
@@ -178,14 +187,6 @@ model = model_builder.SiameseNetwork(l1=data_setup.L1, l2=data_setup.L2, l3=data
 #                                                 fc_units3=4096, fc_units4=128, fc_units5=None)
 
 
-# Matching params
-nsamp = 50
-threshold = None
-target_sink = "164"
-target_projection = "3"
-target_normalizer = pd.read_csv(f"/lustre/astro/antonmol/learning_stuff/siamese_networks/metadata_stats_sink{target_sink}.csv", index_col=0)
-
-target_snapshots = ["000454"]#, "000578", "000638", "000690"]
 
 
 structure_dict = {
@@ -205,24 +206,39 @@ structure_dict = {
                     
                     "distance_function": data_setup.distance_function,
                     "norm_type": data_setup.norm_type,
-                    "normalizer": normalizer_file,
+                    "normalizer": data_setup.normalizer_file,
 
                     "num_workers": data_setup.NUM_WORKERS,
                     "patience": data_setup.PATIENCE,
                     "min_delta": data_setup.MIN_DELTA,
-                    "datafolder": data_setup.data_folder
+                    "datafolder": str(data_setup.data_folder)
 
     }
 
+tuning_params = False
 
-
-def main(model):
+def main(model, model_name):
+    print("[INFO] Running main training setup for model:")
+    data_setup.model_name = model_name
+    print(data_setup.model_name)
+    # Matching params
+    nsamp = 50
+    threshold = None
+    
+    target_projection = "3"
+    if data_type == "pkl":
+        target_sink = "164"
+        target_normalizer = pd.read_csv(f"/lustre/astro/antonmol/learning_stuff/siamese_networks/metadata_stats_sink{target_sink}.csv", index_col=0)
+        target_snapshots = ["000454"]#, "000578", "000638", "000690"]
+    elif data_type == "krisha":
+        target_sink = "178"
+        target_normalizer = pd.read_csv(f"/lustre/astro/antonmol/learning_stuff/siamese_networks/metadata_stats_sink{target_sink}_krisha.csv", index_col=0)
+        target_snapshots = ["1000"]#, "000578", "000638", "000690"]
     #global model
     #ray.init()
     optimizer_str = None
 
-    tuning_params = False
-
+    #tuning_params = True
 
     start_time = time.time()
     train_dataloader, validation_dataloader, test_dataloader = data_setup.create_dataloaders(
@@ -236,7 +252,8 @@ def main(model):
                                                                     batch_size=data_setup.BATCH_SIZE, 
                                                                     num_workers=data_setup.NUM_WORKERS,
                                                                     random_seed=data_setup.RANDOM_SEED,
-                                                                    distance_function=data_setup.distance_function
+                                                                    distance_function=data_setup.distance_function,
+                                                                    save_dataset=data_setup.save_dataset,
                                                                     )
     
     end_time = time.time()
@@ -244,228 +261,13 @@ def main(model):
     elapsed_time = end_time - start_time
     print("Time for loading/creating data:", elapsed_time, "seconds")
     
+    
+
+
+
     if tuning_params:
         
-
-        
-        # if isinstance(model, model_builder.SiameseNetwork_fcs):
-        #     config["fc3"] = ray.tune.choice([128, 1024, 2048, 4096])  # 64, 128
-        #     config["fc4"] = ray.tune.choice([128, 512, None])  # 64, 128
-        #     config["fc5"] = ray.tune.choice([None])  # 64, 128
-            #data_setup.num_samples = 2*data_setup.num_samples
-        
-        #model = ray.put(model)
-
-        def train_func(config):#, train_dataloader, validation_dataloader):
-            #global model
-            #ray.tune.utils.wait_for_gpu()
-            # model = model_builder.SiameseNetwork_fcs(config["l1"], config["l2"],
-            #                 config["l3"], config["l4"],
-            #                 config["l5"], config["fc1"], 
-            #                 config["fc2"], config["fc3"],
-            #                 config["fc4"], config["fc5"])
-            # print("inside model before:", model)
-            # model = ray.get(model)
-            # print("inside model after:", model)
-            # if isinstance(model, model_builder.SiameseNetwork):
-            model = model_builder.SiameseNetwork(config["l1"], config["l2"],
-                        config["l3"], config["l4"],
-                        config["l5"], config["fc1"], 
-                        config["fc2"])
-            # model.l1 = config["l1"]
-            # model.l2 = config["l2"]
-            # model.l3 = config["l3"]
-            # model.l4 = config["l4"]
-            # model.l5 = config["l5"]
-            # model.fc1 = config["fc1"]
-            # model.fc2 = config["fc2"]
-            # if isinstance(model, model_builder.SiameseNetwork_fcs):
-            #     model.fc3 = config["fc3"]
-            #     model.fc4 = config["fc4"]
-            #     model.fc5 = config["fc5"]
-            
-            os.environ["CUDA_VISIBLE_DEVICES"]="2"  # Choose which device to use (astro01 has 4 gpu's)
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-            model.to(device)
-
-            loss_fn = engine.ContrastiveLoss(margin=config["margin"])
-
-            if str(config["optimizer"]) == "ADAM":
-                #print("Using ADAM optimizer")
-                optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
-            elif str(config["optimizer"]) == "SGD":
-                #print("Using SDG optimizer")
-                optimizer = torch.optim.SGD(model.parameters(), lr=config["lr"])
-            else:
-                print("Optimizer not defined, setting to adam..")
-                optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
-
-            checkpoint = ray.train.get_checkpoint() #checkpoint = session.get_checkpoint()
-            
-            if checkpoint:
-                with checkpoint.as_directory() as checkpoint_dir:
-                    checkpoint_state = torch.load(os.path.join(checkpoint_dir, "checkpoint.pt"))
-                    start_epoch = checkpoint_state["epoch"]
-                    model.load_state_dict(checkpoint_state["model_state_dict"])
-                    optimizer.load_state_dict(checkpoint_state["optimizer_state_dict"])
-            else:
-                start_epoch = 0
-
-            if data_setup.TRAIN_SIZE >= 0.2:
-                data_setup.TRAIN_SIZE == 0.2
-            
-            train_dataloader, validation_dataloader, _ = data_setup.create_dataloaders(
-                                                                    data_setup.data_folder,
-                                                                    data_setup.md_names,
-                                                                    normalizer,
-                                                                    data_setup.dataloader_dir,
-                                                                    data_type,
-                                                                    train_size=data_setup.TRAIN_SIZE, 
-                                                                    transform=data_setup.transform, 
-                                                                    batch_size=4, 
-                                                                    num_workers=data_setup.NUM_WORKERS,
-                                                                    random_seed=data_setup.RANDOM_SEED,
-                                                                    distance_function=data_setup.distance_function
-                                                                    )
-
-            scaler = torch.cuda.amp.GradScaler() 
-
-            for epoch in range(start_epoch, 5):  # loop over the dataset multiple times
-                model.train()
-
-                for batch in train_dataloader:
-                    img1, img2 = batch[0], batch[1] # NOTE: Model takes as input image sets when working with batches
-                    img1 = img1.to(device).float()
-                    img2 = img2.to(device).float()
-                    sim_score = batch[2].to(device).float()
-
-                    optimizer.zero_grad()
-                    with torch.autocast(device_type="cuda", dtype=torch.float16):
-                        output1, output2, prediction = model(img1, img2) 
-                        assert output1.dtype is torch.float16
-                        assert output2.dtype is torch.float16
-                        training_loss, _, _ = loss_fn(output1, output2, prediction, sim_score) 
-                        assert training_loss.dtype is torch.float32
-
-                        #training_loss_output.append(training_loss.item())
-                    scaler.scale(torch.mean(training_loss)).backward(retain_graph=True)
-                    scaler.step(optimizer)
-                    scaler.update()
-                
-                model.eval()  # Set the model to evaluation mode
-                validation_loss_output = []
-                truths = []
-                predictions = []
-                for batch in validation_dataloader:
-                    val_img1, val_img2 = batch[0], batch[1]
-                    val_img1 = val_img1.to(device).float()
-                    val_img2 = val_img2.to(device).float()
-                    val_truth = batch[2].to(device).float()
-                    truths.append(val_truth.detach().cpu().numpy())
-
-                    optimizer.zero_grad()
-
-                    with torch.autocast(device_type="cuda", dtype=torch.float16):
-                        val_output1, val_output2, val_prediction = model(val_img1, val_img2) 
-                        predictions.append(val_prediction.detach().cpu().numpy())
-                        assert val_output1.dtype is torch.float16
-                        assert val_output2.dtype is torch.float16
-                        #assert val_similarity.dtype is torch.float16
-                        validation_loss, _, _ = loss_fn(val_output1, val_output2, val_prediction, val_truth) 
-                        assert validation_loss.dtype is torch.float32
-                        
-                        validation_loss_output.append(torch.mean(validation_loss).item())
-                        #predictions.append(val_prediction.detach().cpu().numpy())
-                        #truths.append(val_sim_score.detach().cpu().numpy())
-
-                    # scaler.scale(torch.mean(validation_loss)).backward(retain_graph=True)
-                    # scaler.step(optimizer)
-                    # scaler.update()
-                validation_loss = np.mean(validation_loss_output)
-
-
-                val_mse = metrics.mean_squared_error(np.concatenate(truths), np.concatenate(predictions))
-                # Report losses
-                ray.train.report({"val_loss": validation_loss, "val_mse": val_mse})
-                
-
-                # current_memory = torch.cuda.memory_allocated(0)
-                # print(f"Total memory usage {current_memory / (1024**2):.2f} MB")
-
-                torch.cuda.empty_cache()
-        
-        checkpoint_dir = "/lustre/astro/antonmol/learning_stuff/siamese_networks/checkpoints"
-        def tune_main(#config,#train_dataloader, validation_dataloader, 
-                      num_samples=10, max_num_epochs=10, cpus=4, gpus_per_trial=1):
-    
-            config = {
-                "l1": ray.tune.choice([32, 64]), #16, 32
-                "l2": ray.tune.choice([64, 128]), #32, 64
-                "l3": ray.tune.choice([64, 128]), #32, 64, 128
-                "l4": ray.tune.choice([64, 256]), #32, 64, 128
-                "l5": ray.tune.choice([64, 128]), #64, 128, 256
-                "fc1": ray.tune.choice([512, 1024, 2048]), #512, 1024
-                "fc2": ray.tune.choice([128, 1024, 2048]), #64, 128
-                "lr": ray.tune.choice([8e-5]), #1e-4, 1e-3, 1e-2
-                "batch_size": ray.tune.choice([32]), #64
-                "margin": ray.tune.choice([1.0]), 
-                "optimizer": ray.tune.choice(["ADAM", "SGD"])
-            }
-
-            scheduler = ASHAScheduler(
-                metric="val_mse",
-                mode="min",
-                max_t=max_num_epochs,
-                grace_period=1,
-                reduction_factor=2,
-            )
-            
-            result = ray.tune.run(
-                partial(train_func, ),#, train_dataloader, validation_dataloader),
-                resources_per_trial={"cpu": cpus, "gpu": gpus_per_trial},
-                config=config,
-                num_samples=num_samples,
-                scheduler=scheduler,
-                local_dir=checkpoint_dir,
-            )
-
-            top_trials = result.trials
-            top_trials.sort(key=lambda trial: trial.last_result.get("val_mse", float("inf")))
-
-            n_saves = 3
-
-
-            # Print the configurations and validation losses of the top three trials
-            for i, trial in enumerate(top_trials[:n_saves]):
-                print(f"Top {i + 1} trial config: {trial.config}")
-                print(f"Top {i + 1} trial final validation loss: {trial.last_result['val_loss']}")
-                print(f"Top {i + 1} trial final mean squared error: {trial.last_result['val_mse']}")
-
-                print("\n")
-
-
-            # Save the output to a text file
-            tuning_path = "/lustre/astro/antonmol/learning_stuff/siamese_networks/hp_tuning"
-            file_path = os.path.join(tuning_path, data_setup.model_name)
-            
-            if not os.path.exists(file_path):
-                os.makedirs(file_path)
-            
-            "Saving as csv file with pandas"
-            params = [trial.config for trial in top_trials]
-            df = pd.DataFrame(params)
-            df['Validation Loss'] = [trial.last_result['val_loss'] for trial in top_trials]
-            df['Mean squared error'] = [trial.last_result['val_mse'] for trial in top_trials]
-            csv_file = os.path.join(file_path, f"nsamp{num_samples}_best_hyperparameters.csv")
-            df.to_csv(csv_file, sep="\t", index=False)
-
-            
-            return top_trials #result
-        
-
-        
-        os.environ["RAY_DEDUP_LOGS"] = "0"
+        os.environ["RAY_DEDUP_LOGS"] = "1"
 
         #num_samples = num
         #max_num_epochs = 10
@@ -477,14 +279,8 @@ def main(model):
         # subset_indices = torch.randperm(len(train_dataset))[:30]
         # tune_train_dataloader = Subset(train_dataset, subset_indices)
         # tune_validation_dataloader = Subset(validation_dataset, subset_indices)
-
-        #ray.init()
-        # print("Model before", model)
-        # model = ray.put(model)
-        # print("MODEL 2 before", model)
-        top_trials = tune_main(num_samples, max_num_epochs, cpus, gpus_per_trial)
+        top_trials = tuning2.tune_main(data_setup.model_name, data_setup.md_names, num_samples, max_num_epochs, cpus, gpus_per_trial)
         
-        #model = ray.get(model)
         print("[INFO] Using best hp configuration params for model")
         data_setup.L1 = top_trials[0].config["l1"]
         data_setup.L2 = top_trials[0].config["l2"]
@@ -494,21 +290,8 @@ def main(model):
         data_setup.FC_UNITS1 = top_trials[0].config["fc1"]
         data_setup.FC_UNITS2 = top_trials[0].config["fc2"]
         data_setup.LEARNING_RATE = top_trials[0].config["lr"]
-        data_setup.BATCH_SIZE = top_trials[0].config["batch_size"]
+        #data_setup.BATCH_SIZE = top_trials[0].config["batch_size"]
         data_setup.MARGIN = top_trials[0].config["margin"]
-        # config = {
-        #         "l1": ray.tune.choice([32, 64]), #16, 32
-        #         "l2": ray.tune.choice([64, 128]), #32, 64
-        #         "l3": ray.tune.choice([64, 128]), #32, 64, 128
-        #         "l4": ray.tune.choice([64, 256]), #32, 64, 128
-        #         "l5": ray.tune.choice([64, 128]), #64, 128, 256
-        #         "fc1": ray.tune.choice([512, 1024, 2048]), #512, 1024
-        #         "fc2": ray.tune.choice([128, 1024, 2048]), #64, 128
-        #         "lr": ray.tune.choice([8e-5]), #1e-4, 1e-3, 1e-2
-        #         "batch_size": ray.tune.choice([32]), #64
-        #         "margin": ray.tune.choice([1.0]), 
-        #         "optimizer": ray.tune.choice(["ADAM", "SGD"])
-        #     }
 
         optimizer_str = top_trials[0].config["optimizer"]
         structure_dict["optimizer"] = optimizer_str
@@ -520,35 +303,31 @@ def main(model):
         structure_dict["fc1"] = data_setup.FC_UNITS1
         structure_dict["fc2"] = data_setup.FC_UNITS2
         structure_dict["lr"] = data_setup.LEARNING_RATE
-        structure_dict["batch_size"] = data_setup.BATCH_SIZE
+        #structure_dict["batch_size"] = data_setup.BATCH_SIZE
         structure_dict["margin"] = data_setup.MARGIN
         
-        
-
-        if "SiameseNetwork_fcs" in data_setup.model_name:  
-            model = model_builder.SiameseNetwork(data_setup.L1, data_setup.L2, data_setup.L3, 
-                                                 data_setup.L4,data_setup.L5, 
-                                                 data_setup.FC_UNITS1, data_setup.FC_UNITS2,
-                                                 data_setup.FC_UNITS3, data_setup.FC_UNITS4,
-                                                 data_setup.FC_UNITS5)
-            print("Network identified as SiameseNetwork_fcs!")
-        else:    
+        if "SiameseNetwork_batchsize" in data_setup.model_name:
             model = model_builder.SiameseNetwork(data_setup.L1, data_setup.L2,
-                            data_setup.L3, data_setup.L4,
-                            data_setup.L5, data_setup.FC_UNITS1, 
-                            data_setup.FC_UNITS2)
-        # model.set_parameters(l1=data_setup.L1, l2=data_setup.L1, l3=data_setup.L1, 
-        #                      l4=data_setup.L1, l5=data_setup.L1, 
-        #                      fc_units1=data_setup.FC_UNITS1, fc_units2=data_setup.FC_UNITS2)
-        # model.l1 = data_setup.L1
-        # model.l2 = data_setup.L2
-        # model.l3 = data_setup.L3
-        # model.l4 = data_setup.L4
-        # model.l5 = data_setup.L5
-        # model.fc_units1 = data_setup.FC_UNITS1
-        # model.fc_units2 = data_setup.FC_UNITS2
-
-        if isinstance(model, model_builder.SiameseNetwork_fcs):
+                        data_setup.L3, data_setup.L4,
+                        data_setup.L5, data_setup.FC_UNITS1, 
+                        data_setup.FC_UNITS2)
+            print("UPDATED MODEL AFTER TUNING")
+        if "SiameseNetwork_he_init_batchsize" in data_setup.model_name:
+            model = model_builder.SiameseNetwork_he_init(data_setup.L1, data_setup.L2,
+                        data_setup.L3, data_setup.L4,
+                        data_setup.L5, data_setup.FC_UNITS1, 
+                        data_setup.FC_UNITS2)
+        if "SiameseNetwork_he_init_batchnorm_batchsize" in data_setup.model_name:
+            model = model_builder.SiameseNetwork_he_init_batchnorm(data_setup.L1, data_setup.L2,
+                        data_setup.L3, data_setup.L4,
+                        data_setup.L5, data_setup.FC_UNITS1, 
+                        data_setup.FC_UNITS2)
+        if "SiameseNetwork_he_init_batchnorm_ELU_batchsize" in data_setup.model_name:
+            model = model_builder.SiameseNetwork_he_init_batchnorm_ELU(data_setup.L1, data_setup.L2,
+                        data_setup.L3, data_setup.L4,
+                        data_setup.L5, data_setup.FC_UNITS1, 
+                        data_setup.FC_UNITS2)
+        if "SiameseNetwork_fcs" in data_setup.model_name:
             data_setup.FC_UNITS3 = top_trials[0].config["fc3"]
             data_setup.FC_UNITS4 = top_trials[0].config["fc4"]
             data_setup.FC_UNITS5 = top_trials[0].config["fc5"]
@@ -559,24 +338,48 @@ def main(model):
             structure_dict["fc4"] = data_setup.FC_UNITS4
             structure_dict["fc5"] = data_setup.FC_UNITS5
 
-
+            model = model_builder.SiameseNetwork_fcs(data_setup.L1, data_setup.L2,
+                        data_setup.L3, data_setup.L4,
+                        data_setup.L5, data_setup.FC_UNITS1, 
+                        data_setup.FC_UNITS2, data_setup.FC_UNITS3,
+                        data_setup.FC_UNITS4, data_setup.FC_UNITS5)
+                
         
-        # model = model_builder.SiameseNetwork_fcs(data_setup.L1, data_setup.L2, data_setup.L3, data_setup.L4, 
-        #                                          data_setup.L5,
-        #                                         data_setup.FC_UNITS1, data_setup.FC_UNITS2,
-        #                                         data_setup.FC_UNITS3, data_setup.FC_UNITS4,
-        #                                         data_setup.FC_UNITS5)
-
-
-
-    
 
     # Print input data shape
     sample_batch = next(iter(train_dataloader))
     batch_shape = sample_batch[0].shape
     print(f"Shape of the batch:")
-    print(f"[batch_size, channels, height, width]", {batch_shape})
+    print(f"[batch_size, channels, height, width]", batch_shape)
+    img1s, img2s = sample_batch[0], sample_batch[1]
 
+    ### Pre-training model interpretation ###
+    if pre_train_interpretation == True:
+        print(f"\n[INFO] Model interpretation started for untrained model.")
+        model_dir = os.path.join(data_setup.output_dir, data_setup.model_name)
+        if not os.path.exists(model_dir):
+            os.mkdir(model_dir)
+        image_dir = os.path.join(model_dir, "images")
+        if not os.path.exists(image_dir):
+            os.mkdir(image_dir)
+        # model_dir = os.path.join(data_setup.output_dir, data_setup.model_name)
+        # if not os.path.exists(model_dir):
+        #     os.mkdir(model_dir)
+        
+        target_types = [[1], [data_setup.L5-1], [np.arange(0, data_setup.L5-1)]]
+        plot_imgs = [img1s[0][0], img2s[0][0]]
+        # For output nodes
+        for target_type in target_types:
+            targets = target_type
+            utils.plot_attr_homemade(model, img1s, img2s, plot_imgs, data_setup.output_dir, data_setup.model_name, device,
+                                targets, layer=None, method="FC2", sign="all", summing=True, order="untrained")
+        
+        # For layer(s)
+        layer = model.encoder[0]
+        utils.plot_attr_homemade(model, img1s, img2s, plot_imgs, data_setup.output_dir, data_setup.model_name, device,
+                                targets, layer=layer, method="layer", sign="all", summing=True, order="untrained")
+    else:
+        print("[INFO] No pre-trained model interpretation is done.")
 
     ########## Set model, loss_func and optimizer ##########
 
@@ -584,7 +387,6 @@ def main(model):
 
     # img_size = len(sample_batch[0][0][0])
     img_size = data_setup.input_size
-    print("IMGSIZE", img_size)
     summary(model, [(1, img_size, img_size),(1, img_size, img_size)], device="cuda")
 
     loss_fn = engine.ContrastiveLoss(margin=data_setup.MARGIN)
@@ -602,6 +404,7 @@ def main(model):
         optimizer = torch.optim.Adam(model.parameters(),
                                     lr=data_setup.LEARNING_RATE
                                     )
+        print("Using Adam optimizer")
     
 
     ########## Add writer ##########
@@ -632,7 +435,7 @@ def main(model):
     ##########----- Show/save outputs -----##########
 
     
-
+    print(structure_dict)
     structure_df = pd.DataFrame(structure_dict, index=[0]).transpose()
     utils.save_model(model,
                     data_setup.output_dir,
@@ -651,48 +454,32 @@ def main(model):
 
 
     ########## Model interpretation ##########
-
+    print(f"\n[INFO] Model interpretation started for trained model.")
+    attrib_anim = False # If True, save animation of all attributions
     h5_images = os.path.join(data_setup.output_dir, data_setup.model_name, "batch_images.h5")
     h5_batch_data = os.path.join(data_setup.output_dir, data_setup.model_name, "batch_data.h5")
+    #img1s, img2s = utils.get_batch_data_hdf5(h5_images, ["img1", "img2"])
+    
+    # For output nodes
+    target_types = [[1], [data_setup.L5], np.arange(0, data_setup.L5-1)]
+    plot_imgs = [img1s[0][0], img2s[0][0]]
+    for target_type in target_types:
+        targets = target_type
+        try:
+            utils.plot_attr_homemade(model, img1s, img2s, plot_imgs, data_setup.output_dir, data_setup.model_name, device,
+                                targets, layer=None, method="FC2", sign="all", summing=True, order="trained")
+        except Exception as e:
+            print("There was an error in creating attributions for untrained model:")
+            print(e)
 
-    attrib_anim = False # If True, save animation of all attributions
-    layer = None
-    targets = args.targets # Specify which output element of the final FC layers to investigate the model using integrated gradients
-    print("targets", targets)
-
-    img1s, img2s = utils.get_batch_data_hdf5(h5_images, ["img1", "img2"])
-    if targets > -1 and targets < 998:
-        print("Running FC2 method") 
-        layer = None
-        method = "FC2"
-        if attrib_anim == True:
-            for n in [0, 1]:
-                utils.animate_attr(data_setup.output_dir, data_setup.model_name, n, method, save=True)
-        utils.plot_attr(model, 
-                        img1s, 
-                        img2s, 
-                        data_setup.output_dir,
-                        data_setup.model_name,
-                        device,
-                        targets,
-                        layer,
-                        method)
-        
-    elif targets == [999]:
-        print("Running layer method")
-        targets = np.arange(0, L5-1)
-        method = "layer"
-        layer = model.encoder[0]
-        
-        utils.plot_attr(model, 
-                        img1s, 
-                        img2s, 
-                        data_setup.output_dir,
-                        data_setup.model_name,
-                        device,
-                        targets,
-                        layer,
-                        method)
+    # For layer(s)
+    layer = model.encoder[0]
+    try:
+        utils.plot_attr_homemade(model, img1s, img2s, plot_imgs, data_setup.output_dir, data_setup.model_name, device,
+                                targets, layer=layer, method="layer", sign="all", summing=True, order="trained")
+    except Exception as e:
+        print("There was an error in creating attributions for untrained model:")
+        print(e)
 
 
 
@@ -716,26 +503,28 @@ def main(model):
 
     ##### Matching test #####
     
-    test_dataloader_path = os.path.join(data_setup.dataloader_dir, \
-            f"tsize{data_setup.TRAIN_SIZE}_bsize{data_setup.BATCH_SIZE}_test_{data_setup.input_size}_{data_setup.distance_function}.pth")
+    if matching_test == True:
+        test_dataloader_path = os.path.join(data_setup.dataloader_dir, \
+                f"tsize{data_setup.TRAIN_SIZE}_bsize{data_setup.BATCH_SIZE}_test_{data_setup.input_size}_{data_setup.distance_function}.pth")
 
-    matching.run(
-        data_setup.output_dir,
-        data_setup.model_name,
-        model,
-        test_dataloader,
-        test_dataloader_path,
-        data_setup.md_names,
-        target_normalizer,
-        target_projection,
-        target_sink,
-        target_snapshots,
-        data_setup.transform,
-        data_setup.BATCH_SIZE,
-        device,
-        nsamp,
-        threshold,
-        )
+        matching.run(
+            data_setup.output_dir,
+            data_setup.model_name,
+            model,
+            test_dataloader,
+            test_dataloader_path,
+            data_setup.md_names,
+            target_normalizer,
+            target_projection,
+            target_sink,
+            target_snapshots,
+            data_setup.transform,
+            data_setup.BATCH_SIZE,
+            device,
+            nsamp,
+            threshold,
+            data_type=data_type
+            )
             
     
     if model_parameter_df is not None:
@@ -745,6 +534,6 @@ def main(model):
 
 if __name__ == "__main__":
     #torch.cuda.empty_cache()
-    main(model)
+    main(model, data_setup.model_name)
 
 
