@@ -30,4 +30,4 @@ further discussed under methods.
 
 # 
 
-![image](structure.png)
+![image](SNN_structure.png)
