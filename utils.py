@@ -58,15 +58,9 @@ def save_model(model: nn.Module,
     """
     # Create folder within output directory for storing model
     model_dir_path = os.path.join(output_dir, model_name)
-    #/lustre/astro/antonmol/learning_stuff/autoencoder/encoder_modular/outputs/test_autoencoder_model
     output_dir_path = Path(model_dir_path)
     output_dir_path.mkdir(parents=True,
                          exist_ok=True)
-    
-    # Create model save path
-    #assert model_name.endswith(".pth") or model_name.endswith(".pt"), "model_name should end with '.pt' or '.pth'"
-
-    # Save the model state_dict()"
     
     model_savename = "{}/{}.pth".format(output_dir_path, model_name)  # Name of saved model
     torch.save(obj=model.state_dict(),
@@ -74,15 +68,10 @@ def save_model(model: nn.Module,
 
     if structure_df is not None:
         print(f"[INFO] Saved model to: {output_dir_path}")
-        # Save the model summary to a text file
-        #result, params_info = torchsummary.summary_string(model, [(1,800,800),(1,800,800)], device="cuda")
         summary_filename = "{}/{}_summary.txt".format(output_dir_path, model_name)
         
         structure_df.to_csv(summary_filename, sep='\t', index=True, header=False)
-        # with open(summary_filename, 'w') as summary_file:
-        #     summary_file.write(structure_df)
-
-
+        
 
 def save_batch_data_hdf5(hf, params: dict, batch_id: int):
     
@@ -143,7 +132,6 @@ def get_batch_data_hdf5(h5_filename, param_names):
 
 
 
-
 def create_clustering_plot(h5_filename, output_dir, model_name, id=None):
     """
     Creates plot of truths versus predictions for 
@@ -163,7 +151,6 @@ def create_clustering_plot(h5_filename, output_dir, model_name, id=None):
         output_dir_path.mkdir(parents=True, exist_ok=True)
 
     save_path = os.path.join(save_dir, f"clustering.png")
-    #plt.figure(figsize=(12,10))
     fig, axs = plt.subplots(2, 2, figsize=(12, 10), gridspec_kw={'height_ratios': [2, 1]})
 
     # Direct comparison
@@ -184,7 +171,6 @@ def create_clustering_plot(h5_filename, output_dir, model_name, id=None):
     axs[1, 0].set_ylim(0.8, 1.0)
     axs[1, 0].set_xlabel("Truths")
     axs[1, 0].set_ylabel("Predictions")
-
 
     # Ranked comparison
     truths_sorted = truths[np.argsort(truths)]
@@ -210,6 +196,7 @@ def create_clustering_plot(h5_filename, output_dir, model_name, id=None):
     plt.savefig(save_path)
     plt.close()
 
+    
 def calculate_mse_from_hdf5(h5_filename):
     "Used to calculate the mean squared error of the truths vs. predictions"
     truths, predictions = get_batch_data_hdf5(h5_filename, ["truths", "predictions"])
@@ -220,6 +207,7 @@ def calculate_mse_from_hdf5(h5_filename):
 
     mse = metrics.mean_squared_error(truths, predictions)
     return mse
+
 
 def calculate_accuracy_from_hdf5(h5_filename, error=0.1, low=0.9, high=1.0):
     "Used to calculate the accuracy of the truths vs. predictions"
@@ -239,8 +227,6 @@ def calculate_accuracy_from_hdf5(h5_filename, error=0.1, low=0.9, high=1.0):
     acc_sum = np.sum(true_scores)
 
     return acc_mean, acc_sum
-
-
 
 
 def plot_training_evolution(h5_training_stats, output_dir, model_name):
@@ -269,17 +255,6 @@ def plot_training_evolution(h5_training_stats, output_dir, model_name):
         except:
             SA = False
 
-
-        # for batch_id, batch_group in hf.items():
-        #     training_loss.append(batch_group["training_loss"][:])
-        #     first_train_loss.append(batch_group["first_train_loss"][:])
-        #     second_train_loss.append(batch_group["second_train_loss"][:])
-        #     validation_loss.append(batch_group["validation_loss"][:])
-        #     first_val_loss.append(batch_group["first_val_loss"][:])
-        #     second_val_loss.append(batch_group["second_val_loss"][:])
-
-
-    #epochs = np.arange(1, len(training_loss[0])+1)
     plt.figure()
     plt.plot(epochs, training_loss, color="b", label="Training loss")
     plt.plot(epochs, first_train_loss, '--', color="b", alpha=0.7, label="First part train")
@@ -312,10 +287,6 @@ def plot_training_evolution(h5_training_stats, output_dir, model_name):
     plt.ylabel("MSE")
     plt.savefig(f"{save_dir}/MSEs.png")
     plt.close()
-
-
-
-
 
 
 
@@ -360,18 +331,11 @@ def plot_attr(model,
     img1 = torch.tensor(img1s[0:1], requires_grad=True).to(device)
     img2 = torch.tensor(img2s[0:1], requires_grad=True).to(device)
     combined_images = torch.cat((img1, img2), dim=1)
-
-    # baseline1 = torch.tensor([0.0]).to(device)
-    # baseline2 = torch.tensor([0.0]).to(device)
-    
     
     vis_folder = os.path.join(output_dir, model_name, "images", "attributions")
     if not os.path.exists(vis_folder):
         os.mkdir(vis_folder)
-    #save_dir = os.path.join(output_dir, model_name, "images", "attributions", "attr")
-    
 
-    
 
     def running(image_number, target, sign):
         """
@@ -532,8 +496,6 @@ def animate_attr(output_dir, model_name, n, method, save=False):
         image = plt.imread(image_path)
         img.set_data(image)
 
-    # def animate(i):
-    #     update_image(i)
 
     ani = FuncAnimation(fig, animate, frames=len(image_files), interval=500)
     html_output = HTML(ani.to_jshtml())
@@ -549,11 +511,8 @@ def animate_attr(output_dir, model_name, n, method, save=False):
 
 
 
-
 def plot_attr_homemade(model, img1s, img2s, plot_imgs, output_dir, model_name, device,
                        targets, layer, method="FC2", sign="all", summing=True, order="trained"):
-    
-    
     print("\nComputing integrated gradients...")
     if method == "layer":
         print(f"... on layer {layer}")
@@ -748,8 +707,6 @@ def plot_x_best(h5_filename, output_dir, model_name, sorter="truths", order="low
 
 
 
-
-
 def plot_gradient_evol(model_parameter_df,
                        output_dir,
                        model_name,): 
@@ -825,16 +782,6 @@ def get_kps(input_size, n_configs, target_size, ks,
             all(x is None or x == y for x, y in zip(specified_paddings, combination[1])) and
             all(x is None or x == y for x, y in zip(specified_strides, combination[2]))):
             combs.append(combination)
-
-    # print(f"{len(possible_combinations)} number of possible combinations for")
-    # print("Kernel sizes: ",init_kernel_sizes)
-    # print("Paddings: ",init_paddings)
-    # print("Strides: ",init_strides)
-
-    # print(f"\n{len(combs)} number of possible combinations for")
-    # print("Kernel sizes: ",specified_kernel_sizes)
-    # print("Paddings: ",specified_paddings)
-    # print("Strides: ",specified_strides)
 
 
     return possible_combinations, combs
@@ -914,9 +861,6 @@ def plot_accuracy(h5_filename, output_dir, model_name, lower_limit=0.9, upper_li
 
 
 
-
-
-
 def get_md_experiment(all_configs, main_folder, search="remaining"):
     all_folders = main_folder
     elements_list = []
@@ -948,9 +892,6 @@ def get_md_experiment(all_configs, main_folder, search="remaining"):
 
 
 
-
-
-
 def metadata_overview(all_metadata, all_titles, norm=True, normtype="minmax"):
     
     plt.figure(figsize=(7, 7))
@@ -979,8 +920,6 @@ def metadata_overview(all_metadata, all_titles, norm=True, normtype="minmax"):
     plt.show()
 
     
-
-
 
 def truth_distributions(all_metadata):
     normalized_metadata_minmax = []
@@ -1068,9 +1007,6 @@ def truth_distributions(all_metadata):
 
 
 
-
-
-
 #########################################
 ############ EXPERIMENTATION ############
 #########################################
@@ -1141,25 +1077,7 @@ def calculate_accuracy(experiment, truths, predictions, lower_limit=0.9, upper_l
         plt.xlim(-0.05, 1.05)
         plt.xlabel("Error")
         plt.ylabel("Counts")
-        # for i, hist in enumerate(hist):
-        #     plt.bar([i], hist[1], color='blue', alpha=0.3)
         plt.title(f"Model accuracy as function of error for\npredictions in limit [{lower_limit}:{upper_limit}]\n\nExperiment: {experiment}")
-        
-        
-
-
-        # plt.subplot(2,1,2)
-        # plt.plot(errors, acc_means, '.', label="Accuracy of bin")
-        # plt.fill_between(errors, acc_means, color="tab:blue", alpha=0.3)
-        # plt.plot(errors, list(accumulate(acc_means)), color="tab:orange", alpha=0.4, label="Accumulated")
-        # plt.fill_between(errors, list(accumulate(acc_means)), color="tab:orange", alpha=0.3)
-        # plt.xlabel("Maximum error")
-        # plt.ylabel("Accuracy")
-        # plt.ylim(-0.05, 1.05)
-        # plt.hlines(1, 0, 1, ls='--', color="k")
-        # plt.legend()
-        # plt.tight_layout()
-        # plt.show()
         
     return acc_means, acc_sums
 
@@ -1185,8 +1103,6 @@ def get_accuracies(experiment_folders, sorter, lower_limit=0.9, upper_limit=1.0,
             else:
                 if prints:
                     print(f"No batch data for experiment {experiment}") 
-                # print("Saving accuracies as -0.1")
-                # accuracies.append(list(np.ones(len(accuracy))*(-0.1)))
 
     if sorter is not None:
         sorted_indices = np.argsort(sorter)
@@ -1225,8 +1141,6 @@ def get_MSEs(experiment_folders, sorter, lower_limit=0.9, upper_limit=1.0, bins=
             else:
                 if prints:
                     print(f"No batch data for experiment {experiment}") 
-                # print("Saving accuracies as -0.1")
-                # accuracies.append(list(np.ones(len(accuracy))*(-0.1)))
 
     if sorter is not None:
         sorted_indices = np.argsort(sorter)
@@ -1258,7 +1172,6 @@ def get_training_stats(experiment_folders=["/lustre/astro/antonmol/learning_stuf
             folder_path = os.path.join(experiment_folder, experiment)
 
             if os.path.isdir(folder_path):
-                #h5_file = os.path.join(folder_path, "training_stats.h5")
                 files = os.listdir(folder_path)
                 if "training_stats.h5" in files and "batch_data.h5" in files:
                     h5_file = os.path.join(folder_path, "training_stats.h5")
@@ -1325,7 +1238,6 @@ def plot_experiments(experiments, variable, var_name, sorter="MSE", n=None,
                 if elements_list_match:
                     elements_list_str = elements_list_match.group(0)  # Extract the matched string
                     elements_list = eval(elements_list_str)
-                    #label = str(elements_list)#experiments[i]
                     label = str(elements_list) + experiments[i][elements_list_match.end():]
                     if "he" in experiments[i]:
                         label = "HI_" + label
@@ -1366,20 +1278,10 @@ def plot_experiments(experiments, variable, var_name, sorter="MSE", n=None,
         ax.set_title(f"{var_name} for {n} best models for predictions within [{lower_limit:.2f}:{upper_limit:.2f}]")
         ax.set_ylim(-0.05, 1.05)
         
-    # Set gray background for the plot area
-    #ax.set_facecolor('grey')
-    #fig.patch.set_facecolor('lightgrey')
-    #fig.legend()
-    # max_label_length = max(len(label) for label in ax.get_legend_handles_labels()[1])
-    # legend_width = max_label_length * 0.005  # Adjust this factor as needed
-    # print("Lw", legend_width)
-    #legend = ax.legend(loc='upper right', bbox_to_anchor=(1 + 0.5, 1))
     box = ax.get_position()
     ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
     legend = ax.legend(loc='upper left', bbox_to_anchor=(1., 1))
-    # legend.get_frame().set_facecolor('lightgrey')
 
-    #fig.tight_layout()
     if save_file:
         plt.savefig(save_file, bbox_inches='tight')
         plt.close()
@@ -1443,3 +1345,5 @@ def save_accuracy_images(experiment_folder, sorter_name, sorter, experiments, er
                         save_file = save_file)
 
         print(f"Saved image at {save_file}")
+
+
