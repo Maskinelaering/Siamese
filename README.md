@@ -39,4 +39,6 @@ further discussed under methods.
 
 
 # The general model structure
+The Siamese Neural Network implements a similarity learning by utilizing the image analysis and representation abilities of a Convolutional Neural Network. It outputs complex, compressed representations for two images simultanously, giving rise to the ability of learning to represent similar images with similar representations and vice versa. 
+
 ![image](SNN_structure.png)
