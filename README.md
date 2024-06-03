@@ -30,4 +30,4 @@ further discussed under methods.
 
 # 
 
-![image](outputs/_experiments/_old_experiments/margins/SiameseNetwork_batchsize32_config3_margin0.5/images/clustering.png)
+![image](structure.png)
