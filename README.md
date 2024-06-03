@@ -28,6 +28,15 @@ a model of such structure to find similar images. Our setup and implementation o
 further discussed under methods.
 
 
-# 
+# The pipeline
 
+1. Setting up PyTorch DataLoaders with pairs of images using data_setup.py. For each pair is computed the ground truth similarity from the metadata of each image.
+2. Build the various models with model_builder.py
+3. Setting up main training and validation loops with engine.py
+4. Setting up hyperparameter tuning with tuning.py
+5. Train the model with train.py
+6. Use the trained model to find best matches between datasets and a target image using matching.py
+
+
+# The general model structure
 ![image](SNN_structure.png)
