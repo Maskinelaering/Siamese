@@ -25,9 +25,6 @@ This script is for tuning hyperparameters of a given model
 DATASET_DIR = "/lustre/astro/antonmol/learning_stuff/siamese_networks/datasets_krisha"
 TRAIN_SIZE = 0.2
 
-#data_setup.distance_function = "cosine"  # cosine, euclid
-
-
 config = {
             "l1": ray.tune.choice([16, 32, 64]), #16, 32
             "l2": ray.tune.choice([32, 64, 128]), #32, 64
@@ -45,63 +42,18 @@ config = {
 # It will then train a number of models in parallel and find the best performing one among these. 
 # We also use the ASHAScheduler which will terminate bad performing trials early.
 
-
 MODEL_NAME = "tuning_SiameseNetwork"
-#data_setup.input_size = 400
-
-
-# "---------------Step 2: Define model and load data"
 
 os.environ["CUDA_VISIBLE_DEVICES"]="3" # Choose cuda device
 os.environ["RAY_DEDUP_LOGS"] = "0"
 
-# def load_data(train_size=TRAIN_SIZE, batch_size=4,
-#               dataset_dir=DATASET_DIR):
-#     # Check if saved dataloaders exist
-#     train_dataset_path = os.path.join(dataset_dir, f"tsize{train_size}_train_{data_setup.input_size}_{data_setup.distance_function}_md_{data_setup.md_names}_datasets.pth")
-#     validation_dataset_path = os.path.join(dataset_dir, f"tsize{train_size}_validation_{data_setup.input_size}_{data_setup.distance_function}_md_{data_setup.md_names}_datasets.pth")
-    
-#     if os.path.exists(train_dataset_path) and os.path.exists(validation_dataset_path): 
-#         # Load datasets and create dataloaders
-#         print("Loading dataset...")
-#         train_data = torch.load(train_dataset_path)
-#         validation_data = torch.load(validation_dataset_path)
-#     else:
-#         raise FileNotFoundError("Dataloaders not found")
-
-    
-
-#     return train_dataloader, validation_dataloader 
-
 transform = transforms.Compose([
         transforms.ToTensor(),  # Convert images to PyTorch tensors
         transforms.CenterCrop(400), # Crop image to 400x400 pixels 
-        #transforms.RandomRotation(45) # Randomly rotates between min/max of specified value
-        # NOTE: Remember to change model_builder.input_size accordingly, if changing size of image by cropping
-
-        # transforms.RandomErasing(),
-        # Add transform here
     ])
 
-"--------------Step 3: define training function-----------"
-# train_dataloader, val_dataloader, _ = data_setup.create_dataloaders(
-#                                                                     data_setup.data_folder,
-#                                                                     data_setup.md_names,
-#                                                                     data_setup.normalizer,
-#                                                                     data_setup.dataloader_dir,
-#                                                                     data_type="pkl",
-#                                                                     train_size=data_setup.TRAIN_SIZE,
-#                                                                     transform=transform, 
-#                                                                     batch_size=data_setup.BATCH_SIZE, 
-#                                                                     num_workers=data_setup.NUM_WORKERS,
-#                                                                     random_seed=data_setup.RANDOM_SEED,
-#                                                                     distance_function=data_setup.distance_function
-#                                                                     )
-# Set model - NOTE: remember to change model name at the top as well, if changing model
-#print(config["l1"].sample())
 
-
-
+"--------------Step 2: define training function-----------"
 def train_func(config):
     global transform
     #ray.tune.utils.wait_for_gpu()
@@ -109,8 +61,6 @@ def train_func(config):
                     config["l3"], config["l4"],
                     config["l5"], config["fc1"], 
                     config["fc2"])
-    
-   
     
     os.environ["CUDA_VISIBLE_DEVICES"]="3"  # Choose which device to use (astro01 has 4 gpu's)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -206,10 +156,6 @@ def train_func(config):
         val_mse = metrics.mean_squared_error(np.concatenate(truths), np.concatenate(predictions))
         # Report losses
         ray.train.report({"val_loss": validation_loss, "val_mse": val_mse})
-        
-
-        # current_memory = torch.cuda.memory_allocated(0)
-        # print(f"Total memory usage {current_memory / (1024**2):.2f} MB")
 
         torch.cuda.empty_cache()
 
@@ -217,8 +163,7 @@ def train_func(config):
 
 
 
-"---------------------Step 4: Tune!------------------------"
-checkpoint_dir = "/lustre/astro/antonmol/learning_stuff/siamese_networks/checkpoints"
+"---------------------Step 3: Tune!------------------------"
 def main(config, #dataloader_dir, 
          num_samples=10, max_num_epochs=10, cpus=4, gpus_per_trial=1):
     
@@ -245,7 +190,6 @@ def main(config, #dataloader_dir,
 
     n_saves = len(top_trials)
 
-
     # Print the configurations and validation losses of the top three trials
     for i, trial in enumerate(top_trials[:n_saves]):
         print(f"Top {i + 1} trial config: {trial.config}")
@@ -253,7 +197,6 @@ def main(config, #dataloader_dir,
         print(f"Top {i + 1} trial final mean squared error: {trial.last_result['val_mse']}")
 
         print("\n")
-
 
     # Save the output to a text file
     tuning_path = "/lustre/astro/antonmol/learning_stuff/siamese_networks/hp_tuning"
@@ -273,7 +216,7 @@ def main(config, #dataloader_dir,
     
     return top_trials #result
 
-"------------Step 5: Run tuner ------------"
+"------------Step 4: Run tuner ------------"
 
 if __name__ == "__main__":
     
