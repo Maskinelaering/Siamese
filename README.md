@@ -28,4 +28,6 @@ a model of such structure to find similar images. Our setup and implementation o
 further discussed under methods.
 
 
-# ![image](https://github.com/Maskinelaering/Siamese/assets/134494876/9e572c9d-69c6-4100-a1b7-4f457c069b5c)
+# 
+
+![image](outputs/_experiments/_old_experiments/margins/SiameseNetwork_batchsize32_config3_margin0.5/images/clustering.png)
