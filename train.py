@@ -42,30 +42,6 @@ The pipeline is as follows:
 
 """
 
-# Default values
-# TRAIN_SIZE = 0.01
-# BATCH_SIZE = 4
-# NUM_WORKERS = 1
-# NUM_EPOCHS = 10
-# MARGIN = 0.9
-# PATIENCE = 5
-# MIN_DELTA = 1e-3
-# LR = 1e-4
-# L1 = 32
-# L2 = 32
-# L3 = 128
-# L4 = 64
-# L5 = 128
-# FC1 = 512
-# FC2 = 128
-# targets = -1
-# RANDOM_SEED = None
-# output_dir = "/lustre/astro/antonmol/learning_stuff/siamese_networks/outputs"
-# model_name = "just_testing"
-# data_folder = "/lustre/astro/antonmol/atm_new_dataset_sink49"
-# dataloader_dir = "/lustre/astro/antonmol/learning_stuff/siamese_networks/dataloaders"
-
-
 # Create an ArgumentParser object
 parser = argparse.ArgumentParser(description="Train a Siamese Network")
 
@@ -127,7 +103,6 @@ data_type = args.data_type
 
 
 ########## Directory params ##########
-
 data_setup.output_dir = args.output_dir
 data_setup.model_name = args.model_name
 data_setup.data_folder = args.data_folder
@@ -139,9 +114,6 @@ if not os.path.exists(data_setup.output_dir):
 
 
 ########## Metadata params ##########
-
-
-
 data_setup.distance_function = "cosine"  # cosine, euclid
 data_setup.norm_type = "z_score" # minmax, z_score
 #DISTANCE_FUNCTION = data_setup.distance_function  # cosine, euclid
@@ -164,9 +136,6 @@ cpus = 40 / (1/gpus_per_trial)
 
 
 ########## Create/load dataset ##########
-
-
-
 data_setup.input_size = 512 # Change input image size if using cropping
 print("Input image size:", data_setup.input_size)
 
@@ -181,12 +150,6 @@ print("Device name", torch.cuda.get_device_name(torch.cuda.current_device()))
 model = model_builder.SiameseNetwork(l1=data_setup.L1, l2=data_setup.L2, l3=data_setup.L3, l4=data_setup.L4, l5=data_setup.L5, 
                                                 fc_units1=data_setup.FC_UNITS1, 
                                                 fc_units2=data_setup.FC_UNITS2)
-
-# model = model_builder.SiameseNetwork_fcs(l1=data_setup.L1, l2=data_setup.L2, l3=data_setup.L3, l4=data_setup.L4, l5=data_setup.L5, 
-#                                                 fc_units1=512, fc_units2=1028,
-#                                                 fc_units3=4096, fc_units4=128, fc_units5=None)
-
-
 
 
 structure_dict = {
@@ -261,24 +224,10 @@ def main(model, model_name):
     elapsed_time = end_time - start_time
     print("Time for loading/creating data:", elapsed_time, "seconds")
     
-    
-
-
 
     if tuning_params:
         
         os.environ["RAY_DEDUP_LOGS"] = "1"
-
-        #num_samples = num
-        #max_num_epochs = 10
-
-        #gpus_per_trial = 0.25
-        #cpus = 40 / (1/gpus_per_trial)
-        # train_dataset = train_dataloader.dataset
-        # validation_dataset = validation_dataloader.dataset
-        # subset_indices = torch.randperm(len(train_dataset))[:30]
-        # tune_train_dataloader = Subset(train_dataset, subset_indices)
-        # tune_validation_dataloader = Subset(validation_dataset, subset_indices)
         top_trials = tuning2.tune_main(data_setup.model_name, data_setup.md_names, num_samples, max_num_epochs, cpus, gpus_per_trial)
         
         print("[INFO] Using best hp configuration params for model")
@@ -290,7 +239,6 @@ def main(model, model_name):
         data_setup.FC_UNITS1 = top_trials[0].config["fc1"]
         data_setup.FC_UNITS2 = top_trials[0].config["fc2"]
         data_setup.LEARNING_RATE = top_trials[0].config["lr"]
-        #data_setup.BATCH_SIZE = top_trials[0].config["batch_size"]
         data_setup.MARGIN = top_trials[0].config["margin"]
 
         optimizer_str = top_trials[0].config["optimizer"]
@@ -303,7 +251,6 @@ def main(model, model_name):
         structure_dict["fc1"] = data_setup.FC_UNITS1
         structure_dict["fc2"] = data_setup.FC_UNITS2
         structure_dict["lr"] = data_setup.LEARNING_RATE
-        #structure_dict["batch_size"] = data_setup.BATCH_SIZE
         structure_dict["margin"] = data_setup.MARGIN
         
         if "SiameseNetwork_batchsize" in data_setup.model_name:
@@ -344,8 +291,6 @@ def main(model, model_name):
                         data_setup.FC_UNITS2, data_setup.FC_UNITS3,
                         data_setup.FC_UNITS4, data_setup.FC_UNITS5)
                 
-        
-
     # Print input data shape
     sample_batch = next(iter(train_dataloader))
     batch_shape = sample_batch[0].shape
@@ -362,9 +307,6 @@ def main(model, model_name):
         image_dir = os.path.join(model_dir, "images")
         if not os.path.exists(image_dir):
             os.mkdir(image_dir)
-        # model_dir = os.path.join(data_setup.output_dir, data_setup.model_name)
-        # if not os.path.exists(model_dir):
-        #     os.mkdir(model_dir)
         
         target_types = [[1], [data_setup.L5-1], [np.arange(0, data_setup.L5-1)]]
         plot_imgs = [img1s[0][0], img2s[0][0]]
@@ -382,15 +324,11 @@ def main(model, model_name):
         print("[INFO] No pre-trained model interpretation is done.")
 
     ########## Set model, loss_func and optimizer ##########
-
-    
-
     # img_size = len(sample_batch[0][0][0])
     img_size = data_setup.input_size
     summary(model, [(1, img_size, img_size),(1, img_size, img_size)], device="cuda")
 
     loss_fn = engine.ContrastiveLoss(margin=data_setup.MARGIN)
-    #loss_fn = nn.CosineEmbeddingLoss(margin=MARGIN)
 
     if optimizer_str == "ADAM":
         optimizer = torch.optim.Adam(model.parameters(),
@@ -431,10 +369,7 @@ def main(model, model_name):
                             min_delta=data_setup.MIN_DELTA
                             )
 
-
     ##########----- Show/save outputs -----##########
-
-    
     print(structure_dict)
     structure_df = pd.DataFrame(structure_dict, index=[0]).transpose()
     utils.save_model(model,
@@ -442,9 +377,7 @@ def main(model, model_name):
                     data_setup.model_name,
                     structure_df)
 
-
     ########## Test! ##########
-
     engine.testing(model,
                     test_dataloader,
                     device,
@@ -458,7 +391,6 @@ def main(model, model_name):
     attrib_anim = False # If True, save animation of all attributions
     h5_images = os.path.join(data_setup.output_dir, data_setup.model_name, "batch_images.h5")
     h5_batch_data = os.path.join(data_setup.output_dir, data_setup.model_name, "batch_data.h5")
-    #img1s, img2s = utils.get_batch_data_hdf5(h5_images, ["img1", "img2"])
     
     # For output nodes
     target_types = [[1], [data_setup.L5], np.arange(0, data_setup.L5-1)]
@@ -481,9 +413,6 @@ def main(model, model_name):
         print("There was an error in creating attributions for untrained model:")
         print(e)
 
-
-
-
     h5_training_stats = os.path.join(data_setup.output_dir, data_setup.model_name, "training_stats.h5")
     utils.plot_training_evolution(h5_training_stats, data_setup.output_dir, data_setup.model_name)
 
@@ -502,7 +431,6 @@ def main(model, model_name):
 
 
     ##### Matching test #####
-    
     if matching_test == True:
         test_dataloader_path = os.path.join(data_setup.dataloader_dir, \
                 f"tsize{data_setup.TRAIN_SIZE}_bsize{data_setup.BATCH_SIZE}_test_{data_setup.input_size}_{data_setup.distance_function}.pth")
@@ -533,7 +461,6 @@ def main(model, model_name):
     torch.cuda.empty_cache()
 
 if __name__ == "__main__":
-    #torch.cuda.empty_cache()
     main(model, data_setup.model_name)
 
 
