@@ -1,7 +1,7 @@
 # Image similarity pipeline with the use of Siamese Neural Networks. 
 This collection of scripts is the backbone for a pipeline for identifying similar images using a Siamese Neural Network.
 
-The pipeline aims to analyze and extract significant features from images of protostellar system. Its objective is to identify images within a vast dataset of simulated images that closely resemble a specified observational image. Subsequently, it maps the distributions of system parameters related to these identified ”best matches”.
+The pipeline aims to analyze and extract significant features from images of protostellar systems (young stars and their surroundings). Its objective is to identify images within a vast dataset of simulated images that closely resemble a specified observational image. Subsequently, it maps the distributions of system parameters related to these identified ”best matches”.
 
 The purpose of implementing machine learning methods to this project is to create a method of matching simulated to observational images, that surpasses manual visual assessment in terms of precision and time. Given that the simulated images provide prior knowledge of system properties such as disk size, mass, and accretion rate, this has potential for creating a pipeline for quicker analysis of observed protostellar systems, when combined with the image matching. In this thesis, we utilize
 a Siamese Neural Network model structure to map the similarity of pairs of images. The idea is to train the model to find the images from a large set of simulated snapshots of protostellar systems, that are most similar to a given target observational image. From the set of most similar images, we can
