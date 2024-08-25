@@ -28,3 +28,8 @@ The end result of the pipeline is first and foremost a mapped set of simulated p
 The Siamese Neural Network implements a similarity learning by utilizing the image analysis and representation abilities of a Convolutional Neural Network. It outputs complex, compressed representations for two images simultanously, giving rise to the ability of learning to represent similar images with similar representations and vice versa. 
 
 ![image](SNN_structure.png)
+
+
+
+### More info
+Are you interested in learning more about this model? Feel free to contact me by mail to anton14mol at gmail.com.
