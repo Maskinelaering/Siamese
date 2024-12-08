@@ -21,7 +21,6 @@ similar the images are, based in their metadata.
 """
 
 
-
 # -------------- Metadata extraction ----------------
 
 def metadata_normalization(data_folders, name, data_type="pkl", save=True):
