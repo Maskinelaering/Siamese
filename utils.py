@@ -75,9 +75,7 @@ def save_model(model: nn.Module,
 
 def save_batch_data_hdf5(hf, params: dict, batch_id: int):
     
-    """
-    Used to save data during training and testing. 
-    """
+    "Used to save data during training and testing. "
 
     batch_group = hf.create_group(f"{batch_id}")
 

@@ -321,7 +321,6 @@ def run(output_dir,
                 torch.cuda.empty_cache()
                 gc.collect()
                 
-
         print(f"Saved outputs at {h5_match}")
 
         for rank in ["best", "random"]:

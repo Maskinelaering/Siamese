@@ -385,7 +385,6 @@ def main(model, model_name):
                     data_setup.model_name,
                     )
 
-
     ########## Model interpretation ##########
     print(f"\n[INFO] Model interpretation started for trained model.")
     attrib_anim = False # If True, save animation of all attributions

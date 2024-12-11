@@ -205,7 +205,7 @@ class SiameseNetwork_ELU(nn.Module):
         )
         strides = [s1, s2, s3, s4, s5, ps1, ps2, ps3, ps4]
         divis = np.prod([x for x in strides if x >= 2])
-        output_size = size/(divis) #NOTE: Update if model dimensions change..
+        output_size = size/(divis) #--NOTE: Update if model dimensions change..
         # Fully connected layers - convert to 1D array
         self.fc = nn.Sequential(
             nn.Linear(l5*int((output_size**2)), fc_units1), 
@@ -311,7 +311,7 @@ class SiameseNetwork_LeakyReLU(nn.Module):
         )
         strides = [s1, s2, s3, s4, s5, ps1, ps2, ps3, ps4]
         divis = np.prod([x for x in strides if x >= 2])
-        output_size = size/(divis) #NOTE: Update if model dimensions change..
+        output_size = size/(divis) #--NOTE: Update if model dimensions change..
         # Fully connected layers - convert to 1D array
         self.fc = nn.Sequential(
             nn.Linear(l5*int((output_size**2)), fc_units1), 
@@ -573,7 +573,7 @@ class SiameseNetwork_he_init_batchnorm(nn.Module):
 
         strides = [s1, s2, s3, s4, s5, ps1, ps2, ps3, ps4]
         divis = np.prod([x for x in strides if x >= 2])
-        output_size = size/(divis) #NOTE: Update if model dimensions change..
+        output_size = size/(divis) #--NOTE: Update if model dimensions change..
         # Fully connected layers - convert to 1D array
         self.fc = nn.Sequential(
             nn.Linear(l5*int((output_size**2)), fc_units1), 
@@ -697,7 +697,7 @@ class SiameseNetwork_batchnorm(nn.Module):
 
         strides = [s1, s2, s3, s4, s5, ps1, ps2, ps3, ps4]
         divis = np.prod([x for x in strides if x >= 2])
-        output_size = size/(divis) #NOTE: Update if model dimensions change..
+        output_size = size/(divis) #--NOTE: Update if model dimensions change..
         # Fully connected layers - convert to 1D array
         self.fc = nn.Sequential(
             nn.Linear(l5*int((output_size**2)), fc_units1), 
@@ -814,7 +814,7 @@ class SiameseNetwork_he_init_batchnorm_ELU(nn.Module):
 
         strides = [s1, s2, s3, s4, s5, ps1, ps2, ps3, ps4]
         divis = np.prod([x for x in strides if x >= 2])
-        output_size = size/(divis) #NOTE: Update if model dimensions change..
+        output_size = size/(divis) #--NOTE: Update if model dimensions change..
         # Fully connected layers - convert to 1D array
         self.fc = nn.Sequential(
             nn.Linear(l5*int((output_size**2)), fc_units1), 
@@ -1053,7 +1053,7 @@ class SiameseAutoencoder(nn.Module):
 
         strides = [s1, s2, s3, s4, s5, ps1, ps2, ps3, ps4]
         divis = np.prod([x for x in strides if x >= 2])
-        output_size = size/(divis) #NOTE: Update if model dimensions change..
+        output_size = size/(divis) #--NOTE: Update if model dimensions change..
         # Fully connected layers - convert to 1D array
         self.fc = nn.Sequential(
             nn.Linear(l5*int((output_size**2)), fc_units1), 
@@ -1172,7 +1172,7 @@ class SiameseNetwork_fcs(nn.Module):
         )
         strides = [s1, s2, s3, s4, s5, ps1, ps2, ps3, ps4]
         divis = np.prod([x for x in strides if x >= 2])
-        output_size = size/(divis) #NOTE: Update if model dimensions change..
+        output_size = size/(divis) #--NOTE: Update if model dimensions change..
         # Fully connected layers - convert to 1D array
         
         if fc_units5 is not None:
