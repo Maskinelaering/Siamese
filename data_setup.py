@@ -29,6 +29,7 @@ def metadata_normalization(data_folders, name, data_type="pkl", save=True):
     Calculate minimum and maximum for each parameter to normalize it. 
     Function not used in training loop
     """
+
     if not isinstance(data_folders, list):
             data_folders = [data_folders]
 
@@ -111,6 +112,7 @@ def metadata_normalization(data_folders, name, data_type="pkl", save=True):
 
 
 def get_metadata(md, md_names, normalizer, filetype="dataframe", norm_type="z_score", data_type="pkl"):
+    
     """
     Collect and normalize metadata
     """
@@ -218,6 +220,10 @@ def get_metadata(md, md_names, normalizer, filetype="dataframe", norm_type="z_sc
 # -------------- Similarity function --------------------
 def similarity_function(md1, md2, md_names, normalizer, distance_function="cosine", data_type="pkl"):
 
+    """
+    Calculates the similarity score (or truth score) of two images based on their metadata.
+    """
+
     MD1, MD1_raw = get_metadata(md1, md_names, normalizer, filetype="dataframe", norm_type=norm_type, data_type=data_type)
     MD2, MD2_raw = get_metadata(md2, md_names, normalizer, filetype="dataframe", norm_type=norm_type, data_type=data_type)
     
@@ -243,6 +249,7 @@ def similarity_function(md1, md2, md_names, normalizer, distance_function="cosin
 
 
 class SetupData(Dataset):
+    
     """
     This class is used to set up datasets of pairs of images, 
     along with their respective metadata for labelling.
@@ -346,6 +353,7 @@ def load_data(data_folder,
               transform=None, 
               random_seed=None,
               distance_function="cosine"):
+    
     """
     This function creates datasets using the SetupData class.
     """
@@ -438,18 +446,18 @@ def load_datasets_hdf5(filename):
 
 
 def create_dataloaders(
-    data_folder,
-    md_names,
-    normalizer,
-    dataloader_dir: str,
-    data_type: str,
-    train_size: float,
-    transform: transforms.Compose, 
-    batch_size: int, 
-    num_workers: int,
-    random_seed: int,
-    distance_function: str,
-    save_dataset=True,
+                        data_folder,
+                        md_names,
+                        normalizer,
+                        dataloader_dir: str,
+                        data_type: str,
+                        train_size: float,
+                        transform: transforms.Compose, 
+                        batch_size: int, 
+                        num_workers: int,
+                        random_seed: int,
+                        distance_function: str,
+                        save_dataset=True,
 ):
     """
     Creates training, validation, and test DataLoaders.

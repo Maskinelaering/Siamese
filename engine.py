@@ -22,6 +22,7 @@ from functools import partial
 import data_setup, utils, tuning
 
 #model_interpreter.run = False
+
 """
 This script is for all the main running parts:
     training, incl. contrastive loss function and early stopping
@@ -183,7 +184,7 @@ def training(model: nn.Module,
 
             optimizer.zero_grad() # zero the gradients so they dont accumulate over epochs
             with torch.autocast(device_type="cuda", dtype=torch.float16): 
-                # run in mixed precision to improve perfomance while maintaining accuracy
+                # run in mixed precision to improve performance while maintaining accuracy
                 # See more: https://pytorch.org/docs/stable/amp.html#autocasting
 
                 # Forward pass
