@@ -27,7 +27,7 @@ The end result of the pipeline is first and foremost a mapped set of simulated p
 The Siamese Neural Network implements a similarity learning by utilizing the image analysis and representation abilities of a Convolutional Neural Network. It outputs complex, compressed representations for two images simultanously, giving rise to the ability of learning to represent similar images with similar representations and vice versa. 
 
 <p align="center">
-  <img width="80%" src="SNN_structure.png" alt="SNN structure">
+  <img width="80%" src="Images/SNN_structure.png" alt="SNN structure">
   <br>
   <i>The architecture of our Siamese network model. Two images are processed through two identical branches of a CNN structure that consists of an encoder and a neural network. The distance between output representations $\hat{x}$ and $\hat{y}$ are compared to a ground truth similarity score $s$, to produce the loss.</i>
 </p>
@@ -45,7 +45,7 @@ $$
 where $T(x,y)$ denotes the target similarity, $D(\hat{x}, \hat{y})$ denotes the distance between the output latent representations $\hat{x}$ and $\hat{y}$, and $m$ is the tunable margin that clarifies the desired maximum distance for dissimilar pairs. The goal of the contrastive loss function is to drive the distance of similar images, where $T\approx 1$, towards zero, while pushing the distance of dissimilar images, where $(1-T)\approx 1$, towards the margin. 
 
 <p align="center">
-  <img width="50%" src="contrastive_loss.png" alt="Contrastive loss function">
+  <img width="70%" src="Images/contrastive_loss.png" alt="Contrastive loss function">
   <br>
   <i>Your caption text here</i>
 </p>
@@ -54,19 +54,19 @@ where $T(x,y)$ denotes the target similarity, $D(\hat{x}, \hat{y})$ denotes the 
 # Results
 
 <p align="center">
-  <img width="95%" src="top_predictions_plot.png" alt="Top predictions">
+  <img width="85%" src="Images/top_predictions_plot.png" alt="Top predictions">
   <br>
   <i>Your caption text here</i>
 </p>
 
 <p align="center">
-  <img width="95%" src="top_predictions_plot.png" alt="Mid predictions">
+  <img width="85%" src="Images/mid_predictions_plot.png" alt="Mid predictions">
   <br>
   <i>Your caption text here</i>
 </p>
 
 <p align="center">
-  <img width="95%" src="bottom_predictions_plot.png" alt="Bottom predictions">
+  <img width="85%" src="Images/bottom_predictions_plot.png" alt="Bottom predictions">
   <br>
   <i>Your caption text here</i>
 </p>
